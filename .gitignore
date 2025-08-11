@@ -1,0 +1,20 @@
+### Gradle ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### Logs ###
+*.log
+
+### OS Files ###
+.DS_Store
+Thumbs.db
+
+### Other ###
+out/
