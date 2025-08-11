@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: music-rec
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
