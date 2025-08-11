@@ -1,0 +1,8 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/music  # 디폴트 포트
+    username: music
+    password: music
+  jpa:
+    hibernate.ddl-auto: update
+    open-in-view: false
