@@ -1,8 +1,21 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/music  # 디폴트 포트
+    url: jdbc:postgresql://localhost:5432/music   # 포트 바꿨으면 여기와 도커 둘 다 동일
     username: music
     password: music
+
   jpa:
-    hibernate.ddl-auto: update
+    hibernate:
+      ddl-auto: validate
     open-in-view: false
+
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=60s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,caches

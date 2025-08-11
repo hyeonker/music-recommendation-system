@@ -1,8 +1,11 @@
 package com.example.musicrecommendation.web.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
+@Schema(description = "신규 곡 등록 요청")
 public record SongCreateRequest(
-        @NotBlank(message = "title은 필수입니다.") String title,
-        @NotBlank(message = "artist는 필수입니다.") String artist
+        @Schema(example = "So What") @NotBlank @Size(max = 200) String title,
+        @Schema(example = "Miles Davis") @NotBlank @Size(max = 200) String artist
 ) {}
