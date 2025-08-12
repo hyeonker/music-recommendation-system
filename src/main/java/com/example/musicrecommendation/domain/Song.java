@@ -34,4 +34,20 @@ public class Song {
         this.title = title;
         this.artist = artist;
     }
+    // === Getters ===
+    public Long getId() {
+        return id;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public String getArtist() {
+        return artist;
+    }
+
+    public Long getVersion() {
+        return version;
+    }
 }

@@ -3,4 +3,3 @@ spring:
     name: music-rec
   profiles:
     default: local
-

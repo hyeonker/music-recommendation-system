@@ -20,6 +20,7 @@ repositories {
 // 외부 라이브러리 버전(변수로 관리)
 val springdocVersion = "2.8.9"
 val flywayVersion = "11.7.2"   // ★ core와 database-postgresql을 반드시 같은 버전으로
+// val jwtVersion = "0.12.3"      // 🔥 나중에 Security 활성화할 때 주석 해제
 
 dependencies {
     // Boot가 관리하므로 버전 ❌
@@ -32,6 +33,15 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
 
+    // 🔥 Security 관련 임시 주석처리 (테스트 통과 후 다시 활성화)
+    // implementation("org.springframework.boot:spring-boot-starter-security")
+    // implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
+
+    // 🔥 JWT 토큰 처리도 임시 주석처리./
+    // implementation("io.jsonwebtoken:jjwt-api:$jwtVersion")
+    // runtimeOnly("io.jsonwebtoken:jjwt-impl:$jwtVersion")
+    // runtimeOnly("io.jsonwebtoken:jjwt-jackson:$jwtVersion")
+
     // OpenAPI(Swagger UI)
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:$springdocVersion")
 
@@ -42,6 +52,10 @@ dependencies {
     // DB 드라이버
     runtimeOnly("org.postgresql:postgresql")
 
+    // 🎵 추천 시스템 의존성들
+    implementation("org.apache.commons:commons-math3:3.6.1")
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
+
     // Lombok
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
@@ -49,7 +63,7 @@ dependencies {
     // Test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    // 나중에 Security 테스트 쓰면 열기
+    // 🔥 Security 테스트도 임시 주석처리
     // testImplementation("org.springframework.security:spring-security-test")
 }
 

@@ -16,6 +16,6 @@ public class OpenApiConfig {
                         .title("Music Recommendation API")
                         .version("v1")
                         .description("Songs CRUD + search (Spring Boot, JPA, Flyway, Caffeine cache)"))
-                .addServersItem(new Server().url("http://localhost:8080"));
+                .addServersItem(new Server().url("http://localhost:9090"));
     }
 }
