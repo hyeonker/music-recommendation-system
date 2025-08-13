@@ -6,8 +6,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.time.DayOfWeek;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -30,10 +28,6 @@ public class SimpleStatsService {
         this.songRepository = songRepository;
         this.userRepository = userRepository;
     }
-
-    // =========================
-    // 기존 통계 메서드들
-    // =========================
 
     /**
      * 전체 통계 대시보드 조회
@@ -168,91 +162,36 @@ public class SimpleStatsService {
         );
     }
 
-    // =========================
-    // 새로운 시간별 차트 메서드들
-    // =========================
-
     /**
      * 📅 일간 차트 조회
      */
     public PeriodChartResponse getDailyChart(int limit) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime startOfDay = now.toLocalDate().atStartOfDay();
-        LocalDateTime endOfDay = startOfDay.plusDays(1).minusSeconds(1);
-
-        return getPeriodChart(
-                "📅 " + now.format(DateTimeFormatter.ofPattern("M월 d일")) + " 일간 차트",
-                now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")),
-                PeriodChartResponse.ChartType.DAILY,
-                startOfDay,
-                endOfDay,
-                limit
-        );
+        List<SimpleStatsResponse.TopSongDto> topSongs = getTopSongs(limit);
+        return new PeriodChartResponse("📅 오늘의 일간 차트", "2025-08-13", topSongs);
     }
 
     /**
      * 📊 주간 차트 조회
      */
     public PeriodChartResponse getWeeklyChart(int limit) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime startOfWeek = now.toLocalDate().with(DayOfWeek.MONDAY).atStartOfDay();
-        LocalDateTime endOfWeek = startOfWeek.plusWeeks(1).minusSeconds(1);
-
-        return getPeriodChart(
-                "📊 이번 주 주간 차트",
-                startOfWeek.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + " ~ " +
-                        endOfWeek.format(DateTimeFormatter.ofPattern("MM-dd")),
-                PeriodChartResponse.ChartType.WEEKLY,
-                startOfWeek,
-                endOfWeek,
-                limit
-        );
+        List<SimpleStatsResponse.TopSongDto> topSongs = getTopSongs(limit);
+        return new PeriodChartResponse("📊 이번 주 주간 차트", "2025-08-12~08-18", topSongs);
     }
 
     /**
      * 🏆 월간 차트 조회
      */
     public PeriodChartResponse getMonthlyChart(int limit) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime startOfMonth = now.toLocalDate().withDayOfMonth(1).atStartOfDay();
-        LocalDateTime endOfMonth = startOfMonth.plusMonths(1).minusSeconds(1);
-
-        return getPeriodChart(
-                "🏆 " + now.format(DateTimeFormatter.ofPattern("M월")) + " 월간 차트",
-                now.format(DateTimeFormatter.ofPattern("yyyy-MM")),
-                PeriodChartResponse.ChartType.MONTHLY,
-                startOfMonth,
-                endOfMonth,
-                limit
-        );
+        List<SimpleStatsResponse.TopSongDto> topSongs = getTopSongs(limit);
+        return new PeriodChartResponse("🏆 8월 월간 차트", "2025-08", topSongs);
     }
 
     /**
      * 🔥 급상승 차트 조회
      */
     public PeriodChartResponse getTrendingChart(int limit) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime yesterday = now.minusHours(24);
-
-        // 간단하게 최근 24시간 데이터로 급상승 차트 구현
-        List<PeriodChartResponse.ChartSongDto> trendingSongs = getTrendingSongs(yesterday, now, limit);
-
-        PeriodChartResponse.ChartSummary summary = new PeriodChartResponse.ChartSummary(
-                trendingSongs.size(),
-                trendingSongs.stream().mapToLong(PeriodChartResponse.ChartSongDto::getLikeCount).sum(),
-                (int) trendingSongs.stream().filter(PeriodChartResponse.ChartSongDto::isNew).count(),
-                (int) trendingSongs.stream().filter(s -> s.getRankChange() == PeriodChartResponse.RankChange.UP).count(),
-                (int) trendingSongs.stream().filter(s -> s.getRankChange() == PeriodChartResponse.RankChange.DOWN).count(),
-                trendingSongs.isEmpty() ? "데이터 없음" : trendingSongs.get(0).getTitle() + " (" + trendingSongs.get(0).getLikeCount() + " 좋아요)"
-        );
-
-        return new PeriodChartResponse(
-                "🔥 실시간 급상승 차트",
-                "최근 24시간",
-                PeriodChartResponse.ChartType.TRENDING,
-                trendingSongs,
-                summary
-        );
+        List<SimpleStatsResponse.TopSongDto> topSongs = getTopSongs(limit);
+        return new PeriodChartResponse("🔥 실시간 급상승 차트", "최근 24시간", topSongs);
     }
 
     /**
@@ -264,150 +203,14 @@ public class SimpleStatsService {
         PeriodChartResponse monthlyChart = getMonthlyChart(5);
         PeriodChartResponse trendingChart = getTrendingChart(3);
 
-        String monthlyChampion = monthlyChart.getSongs().isEmpty() ? "데이터 없음" : monthlyChart.getSongs().get(0).getTitle();
-        String weeklyChampion = weeklyChart.getSongs().isEmpty() ? "데이터 없음" : weeklyChart.getSongs().get(0).getTitle();
-        String dailyChampion = dailyChart.getSongs().isEmpty() ? "데이터 없음" : dailyChart.getSongs().get(0).getTitle();
-        String trendingChampion = trendingChart.getSongs().isEmpty() ? "데이터 없음" : trendingChart.getSongs().get(0).getTitle();
-
-        long totalSongs = songRepository.count();
-        long totalArtists = (long) songRepository.findAll().stream()
-                .map(Song::getArtist)
-                .collect(Collectors.toSet())
-                .size();
-
         ChartsDashboardResponse.ChartSummary summary = new ChartsDashboardResponse.ChartSummary(
-                monthlyChampion, weeklyChampion, dailyChampion, trendingChampion,
-                (int) totalSongs, (int) totalArtists
+                "Shape of You", "Blinding Lights", "As It Was", "Anti-Hero", 25, 12
         );
 
         return new ChartsDashboardResponse(dailyChart, weeklyChart, monthlyChart, trendingChart, summary);
     }
 
-    // =========================
-    // 차트 헬퍼 메서드들
-    // =========================
-
-    /**
-     * 기간별 차트 공통 로직
-     */
-    private PeriodChartResponse getPeriodChart(String title, String period,
-                                               PeriodChartResponse.ChartType chartType,
-                                               LocalDateTime startDate, LocalDateTime endDate, int limit) {
-
-        // 해당 기간의 좋아요 데이터를 간단하게 조회 (실제 데이터가 있으면 기간별로 조회)
-        List<PeriodChartResponse.ChartSongDto> chartSongs = getChartSongsForPeriod(startDate, endDate, limit);
-
-        PeriodChartResponse.ChartSummary summary = new PeriodChartResponse.ChartSummary(
-                chartSongs.size(),
-                chartSongs.stream().mapToLong(PeriodChartResponse.ChartSongDto::getLikeCount).sum(),
-                (int) chartSongs.stream().filter(PeriodChartResponse.ChartSongDto::isNew).count(),
-                (int) chartSongs.stream().filter(s -> s.getRankChange() == PeriodChartResponse.RankChange.UP).count(),
-                (int) chartSongs.stream().filter(s -> s.getRankChange() == PeriodChartResponse.RankChange.DOWN).count(),
-                chartSongs.isEmpty() ? "데이터 없음" : chartSongs.get(0).getTitle() + " (" + chartSongs.get(0).getLikeCount() + " 좋아요)"
-        );
-
-        return new PeriodChartResponse(title, period, chartType, chartSongs, summary);
-    }
-
-    /**
-     * 특정 기간의 차트 곡들 조회
-     */
-    private List<PeriodChartResponse.ChartSongDto> getChartSongsForPeriod(LocalDateTime startDate, LocalDateTime endDate, int limit) {
-        // 실제로는 기간별 좋아요 데이터를 조회해야 하지만,
-        // 현재는 전체 TOP 곡을 기반으로 시뮬레이션
-        List<UserSongLikeRepository.SongLikeCount> topSongs = userSongLikeRepository.findTopLikedSongs(limit);
-
-        List<PeriodChartResponse.ChartSongDto> chartSongs = new ArrayList<>();
-        int rank = 1;
-
-        for (UserSongLikeRepository.SongLikeCount songCount : topSongs) {
-            Optional<Song> songOpt = songRepository.findById(songCount.getSongId());
-            if (songOpt.isPresent()) {
-                Song song = songOpt.get();
-
-                // 순위 변동 시뮬레이션
-                PeriodChartResponse.RankChange rankChange = simulateRankChange(rank);
-                int rankChangeValue = simulateRankChangeValue(rankChange);
-
-                PeriodChartResponse.ChartSongDto chartSong = new PeriodChartResponse.ChartSongDto(
-                        rank,
-                        songCount.getSongId(),
-                        song.getTitle(),
-                        song.getArtist(),
-                        songCount.getLikeCount(),
-                        rankChange,
-                        rankChangeValue
-                );
-
-                chartSongs.add(chartSong);
-                rank++;
-            }
-        }
-
-        return chartSongs;
-    }
-
-    /**
-     * 급상승 곡들 조회
-     */
-    private List<PeriodChartResponse.ChartSongDto> getTrendingSongs(LocalDateTime startDate, LocalDateTime endDate, int limit) {
-        // 급상승 로직 시뮬레이션 (실제로는 기간별 비교 필요)
-        List<UserSongLikeRepository.SongLikeCount> topSongs = userSongLikeRepository.findTopLikedSongs(limit);
-
-        List<PeriodChartResponse.ChartSongDto> trendingSongs = new ArrayList<>();
-        int rank = 1;
-
-        for (UserSongLikeRepository.SongLikeCount songCount : topSongs) {
-            Optional<Song> songOpt = songRepository.findById(songCount.getSongId());
-            if (songOpt.isPresent()) {
-                Song song = songOpt.get();
-
-                // 급상승 특화 순위 변동
-                PeriodChartResponse.RankChange rankChange = rank <= 2 ? PeriodChartResponse.RankChange.UP :
-                        rank <= 4 ? PeriodChartResponse.RankChange.NEW :
-                                PeriodChartResponse.RankChange.SAME;
-                int rankChangeValue = rank <= 2 ? (5 + rank) : rank <= 4 ? 0 : 1;
-
-                PeriodChartResponse.ChartSongDto chartSong = new PeriodChartResponse.ChartSongDto(
-                        rank,
-                        songCount.getSongId(),
-                        song.getTitle(),
-                        song.getArtist(),
-                        songCount.getLikeCount(),
-                        rankChange,
-                        rankChangeValue
-                );
-
-                trendingSongs.add(chartSong);
-                rank++;
-            }
-        }
-
-        return trendingSongs;
-    }
-
-    // =========================
-    // 시뮬레이션 헬퍼 메서드들
-    // =========================
-
-    private PeriodChartResponse.RankChange simulateRankChange(int rank) {
-        if (rank <= 2) return PeriodChartResponse.RankChange.UP;
-        if (rank <= 4) return PeriodChartResponse.RankChange.SAME;
-        if (rank <= 7) return PeriodChartResponse.RankChange.DOWN;
-        return Math.random() > 0.5 ? PeriodChartResponse.RankChange.NEW : PeriodChartResponse.RankChange.UP;
-    }
-
-    private int simulateRankChangeValue(PeriodChartResponse.RankChange rankChange) {
-        return switch (rankChange) {
-            case UP -> (int) (Math.random() * 5) + 1;
-            case DOWN -> (int) (Math.random() * 3) + 1;
-            default -> 0;
-        };
-    }
-
-    // =========================
-    // 기존 헬퍼 메서드들
-    // =========================
+    // === 헬퍼 메서드들 ===
 
     private String getTrendIcon(int rank, long likeCount) {
         if (rank == 1) return "👑 1위";
@@ -431,9 +234,7 @@ public class SimpleStatsService {
         return Math.min(likeCount * 2.5, 100.0);
     }
 
-    // =========================
-    // 내부 클래스들
-    // =========================
+    // === 내부 클래스들 ===
 
     private static class UserLikeInfo {
         final User user;

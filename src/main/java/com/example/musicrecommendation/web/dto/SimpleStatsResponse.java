@@ -1,255 +1,408 @@
 package com.example.musicrecommendation.web.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 간단한 통계 대시보드 응답 DTO
+ * 통계 응답 DTO
  */
-@Schema(description = "통계 대시보드")
+@Schema(description = "통계 응답")
 public class SimpleStatsResponse {
 
-    @Schema(description = "TOP 인기 곡들")
-    private List<TopSongDto> topSongs;
+    @Schema(description = "곡 정보")
+    public static class SongResponse {
+        @Schema(description = "곡 ID")
+        private Long id;
 
-    @Schema(description = "활발한 사용자들")
-    private List<TopUserDto> activeUsers;
+        @Schema(description = "곡 제목")
+        private String title;
 
-    @Schema(description = "인기 아티스트들")
-    private List<TopArtistDto> topArtists;
+        @Schema(description = "아티스트")
+        private String artist;
 
-    @Schema(description = "전체 통계")
-    private OverallStatsDto overallStats;
+        @Schema(description = "앨범")
+        private String album;
 
-    /**
-     * 기본 생성자
-     */
-    public SimpleStatsResponse() {}
+        @Schema(description = "좋아요 수")
+        private Long likeCount;
 
-    /**
-     * 전체 생성자
-     */
-    public SimpleStatsResponse(List<TopSongDto> topSongs, List<TopUserDto> activeUsers,
-                               List<TopArtistDto> topArtists, OverallStatsDto overallStats) {
-        this.topSongs = topSongs;
-        this.activeUsers = activeUsers;
-        this.topArtists = topArtists;
-        this.overallStats = overallStats;
+        public SongResponse() {}
+
+        public SongResponse(Long id, String title, String artist, String album, Long likeCount) {
+            this.id = id;
+            this.title = title;
+            this.artist = artist;
+            this.album = album;
+            this.likeCount = likeCount;
+        }
+
+        // Getters and Setters
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+
+        public String getArtist() { return artist; }
+        public void setArtist(String artist) { this.artist = artist; }
+
+        public String getAlbum() { return album; }
+        public void setAlbum(String album) { this.album = album; }
+
+        public Long getLikeCount() { return likeCount; }
+        public void setLikeCount(Long likeCount) { this.likeCount = likeCount; }
     }
 
-    // === Getters and Setters ===
-    public List<TopSongDto> getTopSongs() {
-        return topSongs;
-    }
-
-    public void setTopSongs(List<TopSongDto> topSongs) {
-        this.topSongs = topSongs;
-    }
-
-    public List<TopUserDto> getActiveUsers() {
-        return activeUsers;
-    }
-
-    public void setActiveUsers(List<TopUserDto> activeUsers) {
-        this.activeUsers = activeUsers;
-    }
-
-    public List<TopArtistDto> getTopArtists() {
-        return topArtists;
-    }
-
-    public void setTopArtists(List<TopArtistDto> topArtists) {
-        this.topArtists = topArtists;
-    }
-
-    public OverallStatsDto getOverallStats() {
-        return overallStats;
-    }
-
-    public void setOverallStats(OverallStatsDto overallStats) {
-        this.overallStats = overallStats;
-    }
-
-    // === 내부 DTO 클래스들 ===
-
-    /**
-     * TOP 곡 정보
-     */
     @Schema(description = "TOP 곡 정보")
     public static class TopSongDto {
-        @Schema(description = "순위", example = "1")
-        private int rank;
+        @Schema(description = "순위")
+        private Integer rank;
 
-        @Schema(description = "곡 정보")
-        private SongResponse song;
+        @Schema(description = "곡 ID")
+        private Long songId;
 
-        @Schema(description = "좋아요 수", example = "42")
-        private long likeCount;
+        @Schema(description = "곡 제목")
+        private String title;
 
-        @Schema(description = "순위 상승/하락", example = "🔥 급상승")
-        private String trendIcon;
+        @Schema(description = "아티스트")
+        private String artist;
+
+        @Schema(description = "앨범")
+        private String album;
+
+        @Schema(description = "좋아요 수")
+        private Long likeCount;
+
+        @Schema(description = "점유율 (%)")
+        private Double percentage;
 
         public TopSongDto() {}
 
-        public TopSongDto(int rank, SongResponse song, long likeCount, String trendIcon) {
+        public TopSongDto(Integer rank, Long songId, String title, String artist, String album, Long likeCount, Double percentage) {
             this.rank = rank;
-            this.song = song;
+            this.songId = songId;
+            this.title = title;
+            this.artist = artist;
+            this.album = album;
             this.likeCount = likeCount;
-            this.trendIcon = trendIcon;
+            this.percentage = percentage;
         }
 
         // Getters and Setters
-        public int getRank() { return rank; }
-        public void setRank(int rank) { this.rank = rank; }
-        public SongResponse getSong() { return song; }
-        public void setSong(SongResponse song) { this.song = song; }
-        public long getLikeCount() { return likeCount; }
-        public void setLikeCount(long likeCount) { this.likeCount = likeCount; }
-        public String getTrendIcon() { return trendIcon; }
-        public void setTrendIcon(String trendIcon) { this.trendIcon = trendIcon; }
+        public Integer getRank() { return rank; }
+        public void setRank(Integer rank) { this.rank = rank; }
+
+        public Long getSongId() { return songId; }
+        public void setSongId(Long songId) { this.songId = songId; }
+
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+
+        public String getArtist() { return artist; }
+        public void setArtist(String artist) { this.artist = artist; }
+
+        public String getAlbum() { return album; }
+        public void setAlbum(String album) { this.album = album; }
+
+        public Long getLikeCount() { return likeCount; }
+        public void setLikeCount(Long likeCount) { this.likeCount = likeCount; }
+
+        public Double getPercentage() { return percentage; }
+        public void setPercentage(Double percentage) { this.percentage = percentage; }
     }
 
-    /**
-     * TOP 사용자 정보
-     */
-    @Schema(description = "활발한 사용자 정보")
+    @Schema(description = "TOP 사용자 정보")
     public static class TopUserDto {
-        @Schema(description = "순위", example = "1")
-        private int rank;
+        @Schema(description = "순위")
+        private Integer rank;
 
-        @Schema(description = "사용자 정보")
-        private UserResponse user;
+        @Schema(description = "사용자 ID")
+        private Long userId;
 
-        @Schema(description = "좋아요 누른 수", example = "28")
-        private long likeCount;
+        @Schema(description = "사용자명")
+        private String username;
 
-        @Schema(description = "활동 점수", example = "92.5")
-        private double activityScore;
+        @Schema(description = "이메일")
+        private String email;
 
-        @Schema(description = "뱃지", example = "🎵 음악광")
-        private String badge;
+        @Schema(description = "총 좋아요 수")
+        private Long totalLikes;
+
+        @Schema(description = "활동 점수")
+        private Double activityScore;
 
         public TopUserDto() {}
 
-        public TopUserDto(int rank, UserResponse user, long likeCount, double activityScore, String badge) {
+        public TopUserDto(Integer rank, Long userId, String username, String email, Long totalLikes, Double activityScore) {
             this.rank = rank;
-            this.user = user;
-            this.likeCount = likeCount;
+            this.userId = userId;
+            this.username = username;
+            this.email = email;
+            this.totalLikes = totalLikes;
             this.activityScore = activityScore;
-            this.badge = badge;
         }
 
         // Getters and Setters
-        public int getRank() { return rank; }
-        public void setRank(int rank) { this.rank = rank; }
-        public UserResponse getUser() { return user; }
-        public void setUser(UserResponse user) { this.user = user; }
-        public long getLikeCount() { return likeCount; }
-        public void setLikeCount(long likeCount) { this.likeCount = likeCount; }
-        public double getActivityScore() { return activityScore; }
-        public void setActivityScore(double activityScore) { this.activityScore = activityScore; }
-        public String getBadge() { return badge; }
-        public void setBadge(String badge) { this.badge = badge; }
+        public Integer getRank() { return rank; }
+        public void setRank(Integer rank) { this.rank = rank; }
+
+        public Long getUserId() { return userId; }
+        public void setUserId(Long userId) { this.userId = userId; }
+
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+
+        public Long getTotalLikes() { return totalLikes; }
+        public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
+
+        public Double getActivityScore() { return activityScore; }
+        public void setActivityScore(Double activityScore) { this.activityScore = activityScore; }
     }
 
-    /**
-     * TOP 아티스트 정보
-     */
-    @Schema(description = "인기 아티스트 정보")
+    @Schema(description = "TOP 아티스트 정보")
     public static class TopArtistDto {
-        @Schema(description = "순위", example = "1")
-        private int rank;
+        @Schema(description = "순위")
+        private Integer rank;
 
-        @Schema(description = "아티스트명", example = "BTS")
-        private String artistName;
+        @Schema(description = "아티스트명")
+        private String name;
 
-        @Schema(description = "총 좋아요 수", example = "156")
-        private long totalLikes;
+        @Schema(description = "총 좋아요 수")
+        private Long totalLikes;
 
-        @Schema(description = "곡 수", example = "8")
-        private int songCount;
+        @Schema(description = "곡 수")
+        private Long songCount;
 
-        @Schema(description = "평균 좋아요", example = "19.5")
-        private double averageLikes;
-
-        @Schema(description = "대표곡")
-        private SongResponse representativeSong;
+        @Schema(description = "인기도")
+        private Double popularity;
 
         public TopArtistDto() {}
 
-        public TopArtistDto(int rank, String artistName, long totalLikes, int songCount,
-                            double averageLikes, SongResponse representativeSong) {
+        public TopArtistDto(Integer rank, String name, Long totalLikes, Long songCount, Double popularity) {
             this.rank = rank;
-            this.artistName = artistName;
+            this.name = name;
             this.totalLikes = totalLikes;
             this.songCount = songCount;
-            this.averageLikes = averageLikes;
-            this.representativeSong = representativeSong;
+            this.popularity = popularity;
         }
 
         // Getters and Setters
-        public int getRank() { return rank; }
-        public void setRank(int rank) { this.rank = rank; }
-        public String getArtistName() { return artistName; }
-        public void setArtistName(String artistName) { this.artistName = artistName; }
-        public long getTotalLikes() { return totalLikes; }
-        public void setTotalLikes(long totalLikes) { this.totalLikes = totalLikes; }
-        public int getSongCount() { return songCount; }
-        public void setSongCount(int songCount) { this.songCount = songCount; }
-        public double getAverageLikes() { return averageLikes; }
-        public void setAverageLikes(double averageLikes) { this.averageLikes = averageLikes; }
-        public SongResponse getRepresentativeSong() { return representativeSong; }
-        public void setRepresentativeSong(SongResponse representativeSong) { this.representativeSong = representativeSong; }
+        public Integer getRank() { return rank; }
+        public void setRank(Integer rank) { this.rank = rank; }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public Long getTotalLikes() { return totalLikes; }
+        public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
+
+        public Long getSongCount() { return songCount; }
+        public void setSongCount(Long songCount) { this.songCount = songCount; }
+
+        public Double getPopularity() { return popularity; }
+        public void setPopularity(Double popularity) { this.popularity = popularity; }
     }
 
-    /**
-     * 전체 통계 정보
-     */
     @Schema(description = "전체 통계 정보")
     public static class OverallStatsDto {
-        @Schema(description = "총 사용자 수", example = "42")
-        private long totalUsers;
+        @Schema(description = "총 사용자 수")
+        private Long totalUsers;
 
-        @Schema(description = "총 곡 수", example = "128")
-        private long totalSongs;
+        @Schema(description = "총 곡 수")
+        private Long totalSongs;
 
-        @Schema(description = "총 좋아요 수", example = "856")
-        private long totalLikes;
+        @Schema(description = "총 좋아요 수")
+        private Long totalLikes;
 
-        @Schema(description = "오늘 새 좋아요", example = "23")
-        private long todayLikes;
+        @Schema(description = "평균 사용자 활동")
+        private Double averageUserActivity;
 
-        @Schema(description = "평균 곡당 좋아요", example = "6.7")
-        private double averageLikesPerSong;
+        @Schema(description = "가장 인기 있는 장르")
+        private String topGenre;
 
-        @Schema(description = "평균 사용자당 좋아요", example = "20.4")
-        private double averageLikesPerUser;
+        @Schema(description = "응답 시간")
+        private LocalDateTime timestamp;
 
         public OverallStatsDto() {}
 
-        public OverallStatsDto(long totalUsers, long totalSongs, long totalLikes,
-                               long todayLikes, double averageLikesPerSong, double averageLikesPerUser) {
+        public OverallStatsDto(Long totalUsers, Long totalSongs, Long totalLikes, Double averageUserActivity, String topGenre) {
             this.totalUsers = totalUsers;
             this.totalSongs = totalSongs;
             this.totalLikes = totalLikes;
-            this.todayLikes = todayLikes;
-            this.averageLikesPerSong = averageLikesPerSong;
-            this.averageLikesPerUser = averageLikesPerUser;
+            this.averageUserActivity = averageUserActivity;
+            this.topGenre = topGenre;
+            this.timestamp = LocalDateTime.now();
         }
 
         // Getters and Setters
-        public long getTotalUsers() { return totalUsers; }
-        public void setTotalUsers(long totalUsers) { this.totalUsers = totalUsers; }
-        public long getTotalSongs() { return totalSongs; }
-        public void setTotalSongs(long totalSongs) { this.totalSongs = totalSongs; }
-        public long getTotalLikes() { return totalLikes; }
-        public void setTotalLikes(long totalLikes) { this.totalLikes = totalLikes; }
-        public long getTodayLikes() { return todayLikes; }
-        public void setTodayLikes(long todayLikes) { this.todayLikes = todayLikes; }
-        public double getAverageLikesPerSong() { return averageLikesPerSong; }
-        public void setAverageLikesPerSong(double averageLikesPerSong) { this.averageLikesPerSong = averageLikesPerSong; }
-        public double getAverageLikesPerUser() { return averageLikesPerUser; }
-        public void setAverageLikesPerUser(double averageLikesPerUser) { this.averageLikesPerUser = averageLikesPerUser; }
+        public Long getTotalUsers() { return totalUsers; }
+        public void setTotalUsers(Long totalUsers) { this.totalUsers = totalUsers; }
+
+        public Long getTotalSongs() { return totalSongs; }
+        public void setTotalSongs(Long totalSongs) { this.totalSongs = totalSongs; }
+
+        public Long getTotalLikes() { return totalLikes; }
+        public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
+
+        public Double getAverageUserActivity() { return averageUserActivity; }
+        public void setAverageUserActivity(Double averageUserActivity) { this.averageUserActivity = averageUserActivity; }
+
+        public String getTopGenre() { return topGenre; }
+        public void setTopGenre(String topGenre) { this.topGenre = topGenre; }
+
+        public LocalDateTime getTimestamp() { return timestamp; }
+        public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }
+    }
+
+    @Schema(description = "사용자 정보")
+    public static class UserDto {
+        @Schema(description = "사용자 ID")
+        private Long id;
+
+        @Schema(description = "사용자명")
+        private String username;
+
+        @Schema(description = "이메일")
+        private String email;
+
+        @Schema(description = "총 좋아요 수")
+        private Long totalLikes;
+
+        @Schema(description = "활동 점수")
+        private Double activityScore;
+
+        public UserDto() {}
+
+        public UserDto(Long id, String username, String email, Long totalLikes, Double activityScore) {
+            this.id = id;
+            this.username = username;
+            this.email = email;
+            this.totalLikes = totalLikes;
+            this.activityScore = activityScore;
+        }
+
+        // Getters and Setters
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+
+        public Long getTotalLikes() { return totalLikes; }
+        public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
+
+        public Double getActivityScore() { return activityScore; }
+        public void setActivityScore(Double activityScore) { this.activityScore = activityScore; }
+    }
+
+    @Schema(description = "아티스트 정보")
+    public static class ArtistDto {
+        @Schema(description = "순위")
+        private Integer rank;
+
+        @Schema(description = "아티스트명")
+        private String name;
+
+        @Schema(description = "총 좋아요 수")
+        private Long totalLikes;
+
+        @Schema(description = "곡 수")
+        private Long songCount;
+
+        @Schema(description = "인기도")
+        private Double popularity;
+
+        public ArtistDto() {}
+
+        public ArtistDto(Integer rank, String name, Long totalLikes, Long songCount, Double popularity) {
+            this.rank = rank;
+            this.name = name;
+            this.totalLikes = totalLikes;
+            this.songCount = songCount;
+            this.popularity = popularity;
+        }
+
+        // Getters and Setters
+        public Integer getRank() { return rank; }
+        public void setRank(Integer rank) { this.rank = rank; }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public Long getTotalLikes() { return totalLikes; }
+        public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
+
+        public Long getSongCount() { return songCount; }
+        public void setSongCount(Long songCount) { this.songCount = songCount; }
+
+        public Double getPopularity() { return popularity; }
+        public void setPopularity(Double popularity) { this.popularity = popularity; }
+    }
+
+    @Schema(description = "대시보드 응답")
+    public static class DashboardResponse {
+        @Schema(description = "총 사용자 수")
+        private Long totalUsers;
+
+        @Schema(description = "총 곡 수")
+        private Long totalSongs;
+
+        @Schema(description = "총 좋아요 수")
+        private Long totalLikes;
+
+        @Schema(description = "활발한 사용자들")
+        private List<UserDto> activeUsers;
+
+        @Schema(description = "인기 곡들")
+        private List<TopSongDto> popularSongs;
+
+        @Schema(description = "인기 아티스트들")
+        private List<ArtistDto> popularArtists;
+
+        @Schema(description = "응답 시간")
+        private LocalDateTime timestamp;
+
+        public DashboardResponse() {}
+
+        public DashboardResponse(Long totalUsers, Long totalSongs, Long totalLikes,
+                                 List<UserDto> activeUsers, List<TopSongDto> popularSongs,
+                                 List<ArtistDto> popularArtists) {
+            this.totalUsers = totalUsers;
+            this.totalSongs = totalSongs;
+            this.totalLikes = totalLikes;
+            this.activeUsers = activeUsers;
+            this.popularSongs = popularSongs;
+            this.popularArtists = popularArtists;
+            this.timestamp = LocalDateTime.now();
+        }
+
+        // Getters and Setters
+        public Long getTotalUsers() { return totalUsers; }
+        public void setTotalUsers(Long totalUsers) { this.totalUsers = totalUsers; }
+
+        public Long getTotalSongs() { return totalSongs; }
+        public void setTotalSongs(Long totalSongs) { this.totalSongs = totalSongs; }
+
+        public Long getTotalLikes() { return totalLikes; }
+        public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
+
+        public List<UserDto> getActiveUsers() { return activeUsers; }
+        public void setActiveUsers(List<UserDto> activeUsers) { this.activeUsers = activeUsers; }
+
+        public List<TopSongDto> getPopularSongs() { return popularSongs; }
+        public void setPopularSongs(List<TopSongDto> popularSongs) { this.popularSongs = popularSongs; }
+
+        public List<ArtistDto> getPopularArtists() { return popularArtists; }
+        public void setPopularArtists(List<ArtistDto> popularArtists) { this.popularArtists = popularArtists; }
+
+        public LocalDateTime getTimestamp() { return timestamp; }
+        public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }
     }
 }

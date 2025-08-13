@@ -115,14 +115,14 @@ public class UserPreferenceProfile {
      */
     public double[] getPreferenceVector() {
         return new double[] {
-            avgAcousticness != null ? avgAcousticness : 0.5,
-            avgDanceability != null ? avgDanceability : 0.5,
-            avgEnergy != null ? avgEnergy : 0.5,
-            avgInstrumentalness != null ? avgInstrumentalness : 0.5,
-            avgLiveness != null ? avgLiveness : 0.5,
-            avgSpeechiness != null ? avgSpeechiness : 0.5,
-            avgValence != null ? avgValence : 0.5,
-            avgTempo != null ? (avgTempo / 200.0) : 0.5 // 정규화
+                avgAcousticness != null ? avgAcousticness : 0.5,
+                avgDanceability != null ? avgDanceability : 0.5,
+                avgEnergy != null ? avgEnergy : 0.5,
+                avgInstrumentalness != null ? avgInstrumentalness : 0.5,
+                avgLiveness != null ? avgLiveness : 0.5,
+                avgSpeechiness != null ? avgSpeechiness : 0.5,
+                avgValence != null ? avgValence : 0.5,
+                avgTempo != null ? (avgTempo / 200.0) : 0.5 // 정규화
         };
     }
 
