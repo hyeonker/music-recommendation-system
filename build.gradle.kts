@@ -33,6 +33,11 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
 
+    // 🚀 WebSocket 의존성 추가 (실시간 매칭 및 채팅용)
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
+    implementation("org.springframework:spring-messaging")
+    implementation("org.springframework:spring-websocket")
+
     // 🔥 Security 관련 임시 주석처리 (테스트 통과 후 다시 활성화)
     // implementation("org.springframework.boot:spring-boot-starter-security")
     // implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
