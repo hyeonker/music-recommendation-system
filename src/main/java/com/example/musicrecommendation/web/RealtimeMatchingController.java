@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
  * 실시간 매칭 REST API 컨트롤러
  */
 @RestController
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001"}, allowCredentials = "true")
 @RequestMapping("/api/realtime-matching")
 @Tag(name = "🔥 Realtime Matching", description = "실시간 1:1 음악 매칭 시스템")
 public class RealtimeMatchingController {

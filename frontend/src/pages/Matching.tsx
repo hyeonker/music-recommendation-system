@@ -10,7 +10,7 @@ const Matching = () => {
     const [waitingTime, setWaitingTime] = useState(0);
     const [queuePosition, setQueuePosition] = useState(0);
     const [isMatching, setIsMatching] = useState(false);
-    const { socket } = useSocket();
+    const { isConnected, requestMatching } = useSocket();
 
     useEffect(() => {
         checkMatchingStatus();
@@ -28,28 +28,31 @@ const Matching = () => {
 
     // WebSocket 이벤트 리스너
     useEffect(() => {
-        if (socket) {
-            socket.on('matchingSuccess', (data: any) => {
-                setMatchingStatus('MATCHED');
-                setMatchedUser(data.matchedUser);
-                toast.success('🎉 매칭 성공! 새로운 음악 친구를 찾았습니다!');
+        const handleMatchingSuccess = (event: CustomEvent) => {
+            setMatchingStatus('MATCHED');
+            setMatchedUser(event.detail.matchedUser || {
+                id: 2,
+                name: '음악친구',
+                chatRoomId: event.detail.roomId
             });
+        };
 
-            socket.on('matchingFailed', () => {
-                setMatchingStatus('IDLE');
-                toast.error('매칭에 실패했습니다. 다시 시도해주세요.');
-            });
+        const handleMatchingFailed = () => {
+            setMatchingStatus('IDLE');
+        };
 
-            return () => {
-                socket.off('matchingSuccess');
-                socket.off('matchingFailed');
-            };
-        }
-    }, [socket]);
+        window.addEventListener('matchingSuccess', handleMatchingSuccess as EventListener);
+        window.addEventListener('matchingFailed', handleMatchingFailed as EventListener);
+
+        return () => {
+            window.removeEventListener('matchingSuccess', handleMatchingSuccess as EventListener);
+            window.removeEventListener('matchingFailed', handleMatchingFailed as EventListener);
+        };
+    }, []);
 
     const checkMatchingStatus = async () => {
         try {
-            const response = await axios.get('/api/realtime-matching/status/1');
+            const response = await axios.get('http://localhost:9090/api/realtime-matching/status/1');
             const status = response.data.status;
 
             setMatchingStatus(status);
@@ -70,15 +73,25 @@ const Matching = () => {
     const startMatching = async () => {
         try {
             setIsMatching(true);
-            const response = await axios.post('/api/realtime-matching/request/1');
 
-            if (response.data.success) {
+            // WebSocket으로 실시간 매칭 요청
+            if (isConnected && requestMatching) {
+                requestMatching();
                 setMatchingStatus('WAITING');
                 setWaitingTime(0);
-                setQueuePosition(response.data.queuePosition || 1);
-                toast.success('매칭 요청이 시작되었습니다!');
+                setQueuePosition(1);
             } else {
-                toast.error(response.data.message || '매칭 요청에 실패했습니다');
+                // 폴백: HTTP API 사용
+                const response = await axios.post('http://localhost:9090/api/realtime-matching/request/1');
+
+                if (response.data.success) {
+                    setMatchingStatus('WAITING');
+                    setWaitingTime(0);
+                    setQueuePosition(response.data.queuePosition || 1);
+                    toast.success('매칭 요청이 시작되었습니다!');
+                } else {
+                    toast.error(response.data.message || '매칭 요청에 실패했습니다');
+                }
             }
         } catch (error) {
             console.error('매칭 시작 오류:', error);
@@ -90,7 +103,7 @@ const Matching = () => {
 
     const cancelMatching = async () => {
         try {
-            await axios.delete('/api/realtime-matching/cancel/1');
+            await axios.delete('http://localhost:9090/api/realtime-matching/cancel/1');
             setMatchingStatus('IDLE');
             setWaitingTime(0);
             setQueuePosition(0);
@@ -103,7 +116,7 @@ const Matching = () => {
 
     const endMatching = async () => {
         try {
-            await axios.delete('/api/realtime-matching/end/1');
+            await axios.delete('http://localhost:9090/api/realtime-matching/end/1');
             setMatchingStatus('IDLE');
             setMatchedUser(null);
             toast.success('매칭이 종료되었습니다');
@@ -115,7 +128,7 @@ const Matching = () => {
 
     const createDemoMatch = async () => {
         try {
-            const response = await axios.post('/api/realtime-matching/demo/quick-match?user1Id=1&user2Id=2');
+            const response = await axios.post('http://localhost:9090/api/realtime-matching/demo/quick-match?user1Id=1&user2Id=2');
             if (response.data.success) {
                 setMatchingStatus('MATCHED');
                 setMatchedUser({
