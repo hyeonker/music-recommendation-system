@@ -3,3 +3,12 @@ spring:
     name: music-rec
   profiles:
     default: local
+
+# spotify 설정을 spring과 같은 레벨로 이동
+spotify:
+  client:
+    id: 576f59a63c2e4d5489e811437862610
+    secret: aaf46151d0bb486f9f31199c0024144e
+  api:
+    base-url: https://api.spotify.com/v1
+    auth-url: https://accounts.spotify.com/api/token

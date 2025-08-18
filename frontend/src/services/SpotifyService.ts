@@ -1,50 +1,21 @@
-// Spotify Web API 연동 서비스
+// Spotify Web API 연동 서비스 (백엔드 통합 버전)
 import axios from 'axios';
 
-// Spotify API 응답 타입 정의
-interface SpotifyArtist {
+// 백엔드 API 응답 타입 정의
+interface BackendArtist {
     id: string;
     name: string;
-    images: Array<{
-        url: string;
-        height: number;
-        width: number;
-    }>;
-    genres: string[];
-    popularity: number;
-    followers: {
-        total: number;
-    };
-    external_urls: {
-        spotify: string;
-    };
-}
-
-interface SpotifySearchResponse {
-    artists: {
-        items: SpotifyArtist[];
-        total: number;
-        limit: number;
-        offset: number;
-    };
-}
-
-interface SpotifyTokenResponse {
-    access_token: string;
-    token_type: string;
-    expires_in: number;
+    image?: string;
+    followers?: number;
+    genres?: string[];
+    popularity?: number;
+    spotifyId?: string;
+    spotifyUrl?: string;
 }
 
 export class SpotifyService {
     private static instance: SpotifyService;
-    private accessToken: string | null = null;
-    private tokenExpiry: number = 0;
-
-    // Spotify API 설정
-    private readonly CLIENT_ID = process.env.REACT_APP_SPOTIFY_CLIENT_ID;
-    private readonly CLIENT_SECRET = process.env.REACT_APP_SPOTIFY_CLIENT_SECRET;
-    private readonly AUTH_URL = 'https://accounts.spotify.com/api/token';
-    private readonly API_BASE_URL = 'https://api.spotify.com/v1';
+    private readonly API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:9090';
 
     private constructor() {}
 
@@ -57,89 +28,46 @@ export class SpotifyService {
     }
 
     /**
-     * Client Credentials 플로우로 액세스 토큰 획득
-     * 사용자 로그인 없이 공개 데이터 접근 가능
+     * 백엔드를 통한 아티스트 검색
      */
-    private async getAccessToken(): Promise<string> {
-        // 토큰이 유효하면 재사용
-        if (this.accessToken && Date.now() < this.tokenExpiry) {
-            return this.accessToken;
-        }
-
-        if (!this.CLIENT_ID || !this.CLIENT_SECRET) {
-            throw new Error('Spotify Client ID와 Client Secret이 환경변수에 설정되지 않았습니다');
-        }
-
+    async searchArtists(query: string, limit: number = 10): Promise<BackendArtist[]> {
         try {
-            const credentials = btoa(`${this.CLIENT_ID}:${this.CLIENT_SECRET}`);
+            console.log(`백엔드로 아티스트 검색 요청: ${query}`);
 
-            const response = await axios.post<SpotifyTokenResponse>(
-                this.AUTH_URL,
-                'grant_type=client_credentials',
-                {
-                    headers: {
-                        'Authorization': `Basic ${credentials}`,
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                }
-            );
+            const response = await axios.get(`${this.API_BASE_URL}/api/spotify/search/artists`, {
+                params: {
+                    q: query,
+                    limit: limit
+                },
+                timeout: 10000 // 10초 타임아웃
+            });
 
-            this.accessToken = response.data.access_token;
-            // 토큰 만료 시간 설정 (5분 여유를 둠)
-            this.tokenExpiry = Date.now() + (response.data.expires_in - 300) * 1000;
-
-            return this.accessToken;
+            console.log('백엔드 검색 응답:', response.data);
+            return response.data || [];
         } catch (error) {
-            console.error('Spotify 액세스 토큰 획득 실패:', error);
-            throw new Error('Spotify API 인증에 실패했습니다');
+            console.error('백엔드 아티스트 검색 실패:', error);
+
+            // 백엔드 API가 없으면 기본 검색 API 사용
+            try {
+                console.log('기본 검색 API로 폴백');
+                const fallbackResponse = await axios.get(`${this.API_BASE_URL}/api/artists/search`, {
+                    params: { q: query }
+                });
+
+                return fallbackResponse.data || [];
+            } catch (fallbackError) {
+                console.error('기본 검색 API도 실패:', fallbackError);
+                throw new Error('아티스트 검색에 실패했습니다');
+            }
         }
     }
 
     /**
-     * 아티스트 검색
+     * 백엔드를 통한 아티스트 상세 정보 조회
      */
-    async searchArtists(query: string, limit: number = 10): Promise<SpotifyArtist[]> {
+    async getArtistById(artistId: string): Promise<BackendArtist | null> {
         try {
-            const token = await this.getAccessToken();
-
-            const response = await axios.get<SpotifySearchResponse>(
-                `${this.API_BASE_URL}/search`,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                    },
-                    params: {
-                        q: query,
-                        type: 'artist',
-                        limit: limit,
-                        market: 'KR', // 한국 시장 기준
-                    },
-                }
-            );
-
-            return response.data.artists.items;
-        } catch (error) {
-            console.error('아티스트 검색 실패:', error);
-            throw new Error('아티스트 검색에 실패했습니다');
-        }
-    }
-
-    /**
-     * 아티스트 ID로 상세 정보 조회
-     */
-    async getArtistById(artistId: string): Promise<SpotifyArtist | null> {
-        try {
-            const token = await this.getAccessToken();
-
-            const response = await axios.get<SpotifyArtist>(
-                `${this.API_BASE_URL}/artists/${artistId}`,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                    },
-                }
-            );
-
+            const response = await axios.get(`${this.API_BASE_URL}/api/spotify/artists/${artistId}`);
             return response.data;
         } catch (error) {
             console.error('아티스트 정보 조회 실패:', error);
@@ -150,10 +78,9 @@ export class SpotifyService {
     /**
      * 아티스트의 최고 품질 이미지 URL 반환
      */
-    static getArtistImageUrl(artist: SpotifyArtist): string {
-        if (artist.images && artist.images.length > 0) {
-            // 가장 큰 이미지 선택 (보통 첫 번째가 가장 큼)
-            return artist.images[0].url;
+    static getArtistImageUrl(artist: BackendArtist): string {
+        if (artist.image) {
+            return artist.image;
         }
 
         // 이미지가 없으면 기본 아바타 반환
@@ -163,33 +90,32 @@ export class SpotifyService {
     /**
      * 여러 아티스트 이름으로 배치 검색
      */
-    async searchMultipleArtists(artistNames: string[]): Promise<Map<string, SpotifyArtist | null>> {
-        const results = new Map<string, SpotifyArtist | null>();
+    async searchMultipleArtists(artistNames: string[]): Promise<Map<string, BackendArtist | null>> {
+        const results = new Map<string, BackendArtist | null>();
 
-        // 동시 요청 수 제한 (API 제한 고려)
-        const BATCH_SIZE = 5;
+        try {
+            const response = await axios.post(`${this.API_BASE_URL}/api/spotify/search/batch`, {
+                artistNames: artistNames
+            });
 
-        for (let i = 0; i < artistNames.length; i += BATCH_SIZE) {
-            const batch = artistNames.slice(i, i + BATCH_SIZE);
+            // 응답 형태에 따라 처리
+            if (response.data) {
+                artistNames.forEach((name, index) => {
+                    results.set(name, response.data[index] || null);
+                });
+            }
+        } catch (error) {
+            console.error('배치 검색 실패:', error);
 
-            const promises = batch.map(async (name) => {
+            // 개별 검색으로 폴백
+            for (const name of artistNames) {
                 try {
                     const artists = await this.searchArtists(name, 1);
-                    return { name, artist: artists[0] || null };
-                } catch (error) {
-                    console.error(`${name} 검색 실패:`, error);
-                    return { name, artist: null };
+                    results.set(name, artists[0] || null);
+                } catch (individualError) {
+                    console.error(`${name} 개별 검색 실패:`, individualError);
+                    results.set(name, null);
                 }
-            });
-
-            const batchResults = await Promise.all(promises);
-            batchResults.forEach(({ name, artist }) => {
-                results.set(name, artist);
-            });
-
-            // API 제한을 피하기 위한 지연
-            if (i + BATCH_SIZE < artistNames.length) {
-                await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
 
@@ -199,53 +125,62 @@ export class SpotifyService {
     /**
      * 인기 장르별 추천 아티스트
      */
-    async getRecommendedArtistsByGenre(genre: string, limit: number = 10): Promise<SpotifyArtist[]> {
+    async getRecommendedArtistsByGenre(genre: string, limit: number = 10): Promise<BackendArtist[]> {
         try {
-            // 장르 기반 검색 쿼리 생성
-            const genreQueries = {
-                'kpop': 'genre:k-pop',
-                'pop': 'genre:pop',
-                'rock': 'genre:rock',
-                'hiphop': 'genre:hip-hop',
-                'electronic': 'genre:electronic',
-                'jazz': 'genre:jazz',
-                'classical': 'genre:classical',
-                'indie': 'genre:indie',
-                'metal': 'genre:metal',
-                'folk': 'genre:folk'
-            };
+            const response = await axios.get(`${this.API_BASE_URL}/api/spotify/recommendations/genre/${genre}`, {
+                params: { limit }
+            });
 
-            const query = genreQueries[genre as keyof typeof genreQueries] || `genre:${genre}`;
-
-            return await this.searchArtists(query, limit);
+            return response.data || [];
         } catch (error) {
             console.error(`${genre} 장르 아티스트 검색 실패:`, error);
-            return [];
+
+            // 장르 기반 일반 검색으로 폴백
+            try {
+                return await this.searchArtists(`genre:${genre}`, limit);
+            } catch (fallbackError) {
+                console.error('장르 검색 폴백도 실패:', fallbackError);
+                return [];
+            }
         }
     }
 
     /**
-     * 아티스트 정보를 앱의 Artist 인터페이스로 변환
+     * Spotify 아티스트 정보를 앱의 Artist 인터페이스로 변환
      */
-    static convertToAppArtist(spotifyArtist: SpotifyArtist): {
+    static convertToAppArtist(backendArtist: BackendArtist): {
         id: string;
         name: string;
         image: string;
         followers?: number;
         genres?: string[];
         popularity?: number;
-        spotifyId: string;
-        spotifyUrl: string;
+        spotifyId?: string;
+        spotifyUrl?: string;
     } {
         return {
-            id: spotifyArtist.id,
-            name: spotifyArtist.name,
-            image: this.getArtistImageUrl(spotifyArtist),
-            followers: spotifyArtist.followers?.total,
-            genres: spotifyArtist.genres,
-            popularity: spotifyArtist.popularity,
-            spotifyId: spotifyArtist.id,
-            spotifyUrl: spotifyArtist.external_urls.spotify,
+            id: backendArtist.id,
+            name: backendArtist.name,
+            image: this.getArtistImageUrl(backendArtist),
+            followers: backendArtist.followers,
+            genres: backendArtist.genres,
+            popularity: backendArtist.popularity,
+            spotifyId: backendArtist.spotifyId,
+            spotifyUrl: backendArtist.spotifyUrl,
+        };
+    }
+
+    /**
+     * 더미 데이터 생성 (백엔드 API가 없을 때 사용)
+     */
+    private generateDummyArtist(name: string): BackendArtist {
+        return {
+            id: `dummy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: name,
+            image: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=random`,
+            followers: Math.floor(Math.random() * 10000000),
+            genres: ['검색결과'],
+            popularity: Math.floor(Math.random() * 100),
         };
     }
 
@@ -254,12 +189,78 @@ export class SpotifyService {
      */
     async checkApiStatus(): Promise<boolean> {
         try {
-            await this.getAccessToken();
-            return true;
+            const response = await axios.get(`${this.API_BASE_URL}/api/spotify/health`, {
+                timeout: 5000
+            });
+            return response.status === 200;
         } catch (error) {
-            console.error('Spotify API 상태 확인 실패:', error);
-            return false;
+            console.log('Spotify 백엔드 API 상태 확인 실패:', error);
+
+            // 기본 백엔드 상태 확인
+            try {
+                const fallbackResponse = await axios.get(`${this.API_BASE_URL}/api/health`, {
+                    timeout: 5000
+                });
+                return fallbackResponse.status === 200;
+            } catch (fallbackError) {
+                console.error('백엔드 연결 실패:', fallbackError);
+                return false;
+            }
         }
+    }
+
+    /**
+     * 개발용: 더미 검색 결과 반환
+     */
+    async getDummySearchResults(query: string): Promise<BackendArtist[]> {
+        console.log(`더미 검색 결과 생성: ${query}`);
+
+        // 유명 아티스트 더미 데이터
+        const dummyData: Record<string, Partial<BackendArtist>> = {
+            'bts': {
+                name: 'BTS',
+                image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=BTS&backgroundColor=6366f1',
+                followers: 35000000,
+                genres: ['K-Pop', 'Pop'],
+                popularity: 95
+            },
+            '아이유': {
+                name: '아이유',
+                image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=IU&backgroundColor=ec4899',
+                followers: 8000000,
+                genres: ['K-Pop', 'Ballad'],
+                popularity: 90
+            },
+            'taylor swift': {
+                name: 'Taylor Swift',
+                image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=TaylorSwift&backgroundColor=f59e0b',
+                followers: 45000000,
+                genres: ['Pop', 'Country'],
+                popularity: 98
+            },
+            'coldplay': {
+                name: 'Coldplay',
+                image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Coldplay&backgroundColor=10b981',
+                followers: 25000000,
+                genres: ['Rock', 'Alternative'],
+                popularity: 85
+            }
+        };
+
+        const normalizedQuery = query.toLowerCase().trim();
+        const matchedArtist = dummyData[normalizedQuery];
+
+        if (matchedArtist) {
+            return [{
+                id: `dummy_${normalizedQuery}`,
+                ...matchedArtist,
+                name: matchedArtist.name || query,
+                image: matchedArtist.image || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(query)}&backgroundColor=random`
+            } as BackendArtist];
+        }
+
+        // 매칭되지 않으면 일반 더미 데이터 반환
+        return [this.generateDummyArtist(query)];
     }
 }
 

@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Save, Music, Search, X, Plus, Star, Heart, BarChart3 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
-import SpotifyService from '../services/SpotifyService';
 
 interface Artist {
     id: string;
@@ -37,55 +36,6 @@ interface UserProfile {
     };
 }
 
-// 아티스트 이미지 서비스
-class ArtistImageService {
-    private static knownArtists: Record<string, string> = {
-        // K-Pop
-        'bts': 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&h=300&fit=crop',
-        '아이유': 'https://images.unsplash.com/photo-1494790108755-2616c27b5518?w=300&h=300&fit=crop',
-        'blackpink': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=300&h=300&fit=crop',
-        'twice': 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=300&h=300&fit=crop',
-        // 팝
-        'taylor swift': 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-        'ariana grande': 'https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=300&h=300&fit=crop',
-        'ed sheeran': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&h=300&fit=crop',
-        'billie eilish': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&h=300&fit=crop',
-        // 록/메탈
-        'queen': 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-        'the beatles': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&h=300&fit=crop',
-        'coldplay': 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&h=300&fit=crop',
-    };
-
-    static getArtistImage(artistName: string): string {
-        const normalizedName = artistName.toLowerCase().trim();
-
-        // 알려진 아티스트 확인
-        if (this.knownArtists[normalizedName]) {
-            return this.knownArtists[normalizedName];
-        }
-
-        // 이름 기반 해시로 일관된 이미지 생성
-        const hash = this.simpleHash(artistName);
-        const colors = ['bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-pink-500', 'bg-yellow-500'];
-        const colorIndex = hash % colors.length;
-        console.log(`Color index for ${artistName}: ${colorIndex}`); // 사용하도록 로그 추가
-
-        // 텍스트 기반 아바타 URL 생성 (UI Avatars 서비스 사용)
-        const initials = artistName.split(' ').map(word => word[0]).join('').slice(0, 2).toUpperCase();
-        return `https://ui-avatars.com/api/?name=${initials}&background=random&color=fff&size=300`;
-    }
-
-    private static simpleHash(str: string): number {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-        }
-        return Math.abs(hash);
-    }
-}
-
 const Profile: React.FC = () => {
     const [profile, setProfile] = useState<UserProfile>({
         id: 1,
@@ -106,7 +56,9 @@ const Profile: React.FC = () => {
     const [searchResults, setSearchResults] = useState<Artist[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [spotifyService] = useState(() => SpotifyService.getInstance());
+
+    // 드롭다운 바깥 클릭 감지용
+    const dropdownRef = useRef<HTMLDivElement | null>(null);
 
     // 사용 가능한 장르 목록 (확장)
     const availableGenres: Genre[] = [
@@ -154,7 +106,6 @@ const Profile: React.FC = () => {
 
     // 주요 음악 페스티벌 목록
     const musicFestivals = [
-        // 해외 메이저 페스티벌
         { id: 'coachella', name: 'Coachella', location: '미국 캘리포니아', type: 'Multi-genre' },
         { id: 'glastonbury', name: 'Glastonbury', location: '영국', type: 'Rock/Pop' },
         { id: 'lollapalooza', name: 'Lollapalooza', location: '미국 시카고', type: 'Multi-genre' },
@@ -165,25 +116,18 @@ const Profile: React.FC = () => {
         { id: 'edc', name: 'Electric Daisy Carnival', location: '미국 라스베가스', type: 'Electronic' },
         { id: 'reading_leeds', name: 'Reading & Leeds', location: '영국', type: 'Rock/Alternative' },
         { id: 'download', name: 'Download Festival', location: '영국', type: 'Rock/Metal' },
-
-        // 일본 페스티벌
         { id: 'fuji_rock', name: '후지 락 페스티벌', location: '일본 니가타', type: 'Rock/Multi-genre' },
         { id: 'summer_sonic', name: '섬머소닉', location: '일본 도쿄/오사카', type: 'Multi-genre' },
         { id: 'rock_in_japan', name: 'Rock in Japan', location: '일본 이바라키', type: 'Rock/J-Pop' },
-
-        // 한국 페스티벌
         { id: 'pentaport', name: '인천 펜타포트 락페스티벌', location: '인천', type: 'Rock/Multi-genre' },
         { id: 'grand_mint', name: '그랜드 민트 페스티벌', location: '서울', type: 'Indie/Folk' },
         { id: 'waterbomb', name: '워터밤', location: '서울', type: 'Hip-Hop/Electronic' },
-        { id: 'dmzpeace', name: 'DMZ 피스 트레인 뮤직 페스티벌', location: '철원', type: 'Rock/Electronic/Indie' },
+        { id: 'rainbow_island', name: '무지개섬', location: '인천', type: 'Electronic' },
         { id: 'kb_rapbeat', name: 'KB 랩비트 페스티벌', location: '서울', type: 'Hip-Hop' },
-
-        // 기타 아시아
+        { id: 'zandari', name: '잔다리 페스타', location: '서울', type: 'Indie' },
         { id: 'wonderfruit', name: 'Wonderfruit', location: '태국', type: 'Multi-genre/Art' },
         { id: 'djakarta_warehouse', name: 'Djakarta Warehouse Project', location: '인도네시아', type: 'Electronic' },
         { id: 'clockenflap', name: 'Clockenflap', location: '홍콩', type: 'Multi-genre' },
-
-        // 유럽 기타
         { id: 'primavera', name: 'Primavera Sound', location: '스페인 바르셀로나', type: 'Indie/Alternative' },
         { id: 'roskilde', name: 'Roskilde Festival', location: '덴마크', type: 'Multi-genre' },
         { id: 'exit', name: 'EXIT Festival', location: '세르비아', type: 'Electronic/Rock' },
@@ -241,7 +185,7 @@ const Profile: React.FC = () => {
         { value: 'music_blogs', label: '음악 블로그' }
     ];
 
-    // 아티스트 검색 (개선된 이미지 지원)
+    // Spotify 아티스트 검색 (백엔드 프록시)
     const searchArtists = async (query: string) => {
         if (!query.trim()) {
             setSearchResults([]);
@@ -250,65 +194,31 @@ const Profile: React.FC = () => {
 
         try {
             setIsSearching(true);
-
-            // 백엔드 아티스트 검색 API 시도
-            const response = await axios.get(`http://localhost:9090/api/artists/search?q=${encodeURIComponent(query)}`);
-
-            if (response.data && response.data.length > 0) {
-                // 백엔드에서 데이터를 받은 경우
-                const artistsWithImages = response.data.map((artist: any) => ({
-                    ...artist,
-                    image: artist.image || ArtistImageService.getArtistImage(artist.name)
-                }));
-                setSearchResults(artistsWithImages);
-            } else {
-                // 백엔드에 데이터가 없으면 더미 데이터 생성
-                const dummyArtists: Artist[] = [
-                    {
-                        id: `search_${Date.now()}`,
-                        name: query,
-                        image: ArtistImageService.getArtistImage(query),
-                        followers: Math.floor(Math.random() * 1000000),
-                        genres: ['검색결과']
-                    }
-                ];
-                setSearchResults(dummyArtists);
-            }
+            const response = await axios.get(`http://localhost:9090/api/spotify/search/artists`, {
+                params: { q: query, limit: 3 }
+            });
+            setSearchResults(response.data);
+            toast.success(`${response.data.length}개 아티스트 검색됨!`);
         } catch (error) {
-            // API 실패 시 더미 데이터로 대체
-            const dummyArtists: Artist[] = [
-                {
-                    id: `search_${Date.now()}`,
-                    name: query,
-                    image: ArtistImageService.getArtistImage(query),
-                    followers: Math.floor(Math.random() * 1000000),
-                    genres: ['검색결과']
-                }
-            ];
-            setSearchResults(dummyArtists);
+            console.error('Spotify 검색 실패:', error);
+            toast.error('검색에 실패했습니다.');
         } finally {
             setIsSearching(false);
         }
     };
 
-    // 아티스트 추가
+    // 아티스트 추가/제거
     const addArtist = (artist: Artist) => {
         if (profile.favoriteArtists.find(a => a.id === artist.id)) {
             toast.error('이미 추가된 아티스트입니다');
             return;
         }
-
-        setProfile(prev => ({
-            ...prev,
-            favoriteArtists: [...prev.favoriteArtists, artist]
-        }));
-
+        setProfile(prev => ({ ...prev, favoriteArtists: [...prev.favoriteArtists, artist] }));
         setArtistSearchQuery('');
         setSearchResults([]);
         toast.success(`${artist.name}이(가) 추가되었습니다`);
     };
 
-    // 아티스트 제거
     const removeArtist = (artistId: string) => {
         setProfile(prev => ({
             ...prev,
@@ -316,45 +226,27 @@ const Profile: React.FC = () => {
         }));
     };
 
-    // 장르 토글
+    // 장르/페스티벌/무드 토글
     const toggleGenre = (genre: Genre) => {
         setProfile(prev => {
             const exists = prev.favoriteGenres.find(g => g.id === genre.id);
-
             if (exists) {
-                return {
-                    ...prev,
-                    favoriteGenres: prev.favoriteGenres.filter(g => g.id !== genre.id)
-                };
-            } else {
-                return {
-                    ...prev,
-                    favoriteGenres: [...prev.favoriteGenres, genre]
-                };
+                return { ...prev, favoriteGenres: prev.favoriteGenres.filter(g => g.id !== genre.id) };
             }
+            return { ...prev, favoriteGenres: [...prev.favoriteGenres, genre] };
         });
     };
 
-    // 페스티벌 토글
     const toggleFestival = (festivalId: string) => {
         setProfile(prev => {
             const exists = prev.attendedFestivals.includes(festivalId);
-
             if (exists) {
-                return {
-                    ...prev,
-                    attendedFestivals: prev.attendedFestivals.filter(id => id !== festivalId)
-                };
-            } else {
-                return {
-                    ...prev,
-                    attendedFestivals: [...prev.attendedFestivals, festivalId]
-                };
+                return { ...prev, attendedFestivals: prev.attendedFestivals.filter(id => id !== festivalId) };
             }
+            return { ...prev, attendedFestivals: [...prev.attendedFestivals, festivalId] };
         });
     };
 
-    // 무드 토글
     const toggleMood = (mood: string) => {
         setProfile(prev => ({
             ...prev,
@@ -371,10 +263,7 @@ const Profile: React.FC = () => {
     const saveProfile = async () => {
         try {
             setIsSaving(true);
-
-            // 백엔드 API 호출
             await axios.put(`http://localhost:9090/api/users/${profile.id}/profile`, profile);
-
             toast.success('프로필이 저장되었습니다!');
         } catch (error) {
             console.error('프로필 저장 실패:', error);
@@ -384,35 +273,52 @@ const Profile: React.FC = () => {
         }
     };
 
-    // 아티스트 검색 디바운싱
+    // 아티스트 검색 디바운스
     useEffect(() => {
         const timer = setTimeout(() => {
-            if (artistSearchQuery) {
-                searchArtists(artistSearchQuery);
-            }
+            if (artistSearchQuery) searchArtists(artistSearchQuery);
         }, 500);
-
         return () => clearTimeout(timer);
     }, [artistSearchQuery]);
 
-    // 프로필 로드
+    // ESC 키로 검색 결과 닫기
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape' && searchResults.length > 0) {
+                setSearchResults([]);
+                setArtistSearchQuery('');
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [searchResults.length]);
+
+    // 드롭다운 바깥 클릭 닫기
+    useEffect(() => {
+        const onDown = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setSearchResults([]);
+            }
+        };
+        document.addEventListener('mousedown', onDown);
+        return () => document.removeEventListener('mousedown', onDown);
+    }, []);
+
+    // 프로필 로드 (더미 fallback)
     useEffect(() => {
         const loadProfile = async () => {
             try {
                 const response = await axios.get(`http://localhost:9090/api/users/${profile.id}/profile`);
-                if (response.data) {
-                    setProfile(response.data);
-                }
+                if (response.data) setProfile(response.data);
             } catch (error) {
                 console.log('프로필 로드 실패 (더미 데이터 사용):', error);
             }
         };
-
         loadProfile();
     }, []); // profile.id 의존성 제거
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6">
+        <div className="bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6 pb-12">
             <div className="max-w-4xl mx-auto">
                 <div className="text-center mb-8">
                     <h1 className="text-4xl font-bold text-white mb-2">음악 프로필</h1>
@@ -453,7 +359,7 @@ const Profile: React.FC = () => {
                     </h2>
 
                     {/* 아티스트 검색 */}
-                    <div className="relative mb-4">
+                    <div className="relative mb-4 z-[999]">
                         <div className="flex items-center">
                             <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                             <input
@@ -461,40 +367,70 @@ const Profile: React.FC = () => {
                                 value={artistSearchQuery}
                                 onChange={(e) => setArtistSearchQuery(e.target.value)}
                                 className="w-full pl-10 pr-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="아티스트를 검색하세요..."
+                                placeholder={isSearching ? '검색 중…' : '아티스트를 검색하세요...'}
                             />
                         </div>
 
-                        {/* 검색 결과 */}
+                        {/* 검색 결과: 인풋 바로 아래 드롭다운 */}
                         {searchResults.length > 0 && (
-                            <div className="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-lg rounded-lg shadow-lg border border-white/30 z-10">
-                                {searchResults.map((artist) => (
-                                    <div
-                                        key={artist.id}
-                                        onClick={() => addArtist(artist)}
-                                        className="flex items-center p-3 hover:bg-blue-50 cursor-pointer border-b border-gray-200 last:border-b-0"
+                            <div
+                                ref={dropdownRef}
+                                className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden z-[9999]"
+                            >
+                                {/* 헤더 */}
+                                <div className="flex justify-between items-center p-3 border-b bg-gradient-to-r from-blue-50 to-purple-50">
+                                    <div>
+                                        <h3 className="font-semibold text-gray-800 text-sm">아티스트 검색 결과</h3>
+                                        <p className="text-xs text-gray-600">{searchResults.length}개 결과</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setSearchResults([])}
+                                        className="text-gray-400 hover:text-gray-600 p-1 rounded-full"
                                     >
-                                        <img
-                                            src={artist.image}
-                                            alt={artist.name}
-                                            className="w-10 h-10 rounded-full object-cover mr-3"
-                                            onError={(e) => {
-                                                const target = e.currentTarget;
-                                                // 실패 시 기본 아바타로 폴백
-                                                target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(artist.name)}&backgroundColor=random`;
-                                            }}
-                                        />
-                                        <div className="flex-1">
-                                            <div className="font-medium text-gray-900">{artist.name}</div>
-                                            <div className="text-sm text-gray-500">
-                                                {artist.followers && `팔로워 ${artist.followers.toLocaleString()}명`}
-                                                {artist.popularity && ` • 인기도 ${artist.popularity}/100`}
-                                                {artist.genres && artist.genres.length > 0 && ` • ${artist.genres.slice(0, 2).join(', ')}`}
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                </div>
+
+                                {/* 리스트 */}
+                                <div className="max-h-80 overflow-y-auto">
+                                    {searchResults.map((artist) => (
+                                        <div
+                                            key={artist.id}
+                                            onClick={() => addArtist(artist)}
+                                            className="flex items-center p-3 hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                                        >
+                                            <img
+                                                src={artist.image}
+                                                alt={artist.name}
+                                                className="w-10 h-10 rounded-full object-cover mr-3 shadow-md"
+                                                onError={(e) => {
+                                                    const target = e.currentTarget;
+                                                    target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(artist.name)}&backgroundColor=random`;
+                                                }}
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-semibold text-gray-900 text-sm">{artist.name}</div>
+                                                <div className="text-xs text-gray-600">
+                                                    {artist.followers && `팔로워 ${artist.followers.toLocaleString()}명`}
+                                                    {artist.popularity && ` • 인기도 ${artist.popularity}/100`}
+                                                </div>
+                                                {artist.genres?.length ? (
+                                                    <div className="text-xs text-gray-500 mt-1">
+                                                        {artist.genres.slice(0, 2).join(' • ')}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <div className="ml-3 p-2 bg-blue-100 text-blue-600 rounded-full hover:bg-blue-200 transition-colors">
+                                                <Plus className="h-4 w-4" />
                                             </div>
                                         </div>
-                                        <Plus className="h-4 w-4 text-blue-500" />
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
+
+                                {/* 푸터 */}
+                                <div className="p-2 bg-gray-50">
+                                    <p className="text-xs text-gray-500 text-center">클릭하여 아티스트를 추가하거나 ESC로 닫기</p>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -510,7 +446,6 @@ const Profile: React.FC = () => {
                                         className="w-16 h-16 rounded-full mx-auto mb-2 object-cover"
                                         onError={(e) => {
                                             const target = e.currentTarget;
-                                            // 첫 번째 시도: DiceBear 아바타
                                             if (!target.src.includes('dicebear')) {
                                                 target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(artist.name)}&backgroundColor=random`;
                                             }
@@ -534,7 +469,7 @@ const Profile: React.FC = () => {
                     <h2 className="text-xl font-bold text-white mb-4">
                         좋아하는 장르 ({profile.favoriteGenres.length})
                     </h2>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto">
                         {availableGenres.map((genre) => {
                             const isSelected = profile.favoriteGenres.find(g => g.id === genre.id);
                             return (
@@ -715,8 +650,7 @@ const Profile: React.FC = () => {
                             <div className="text-white text-sm">
                                 {profile.favoriteArtists.length > 0
                                     ? profile.favoriteArtists.map(a => a.name).join(', ')
-                                    : '아직 선택하지 않음'
-                                }
+                                    : '아직 선택하지 않음'}
                             </div>
                         </div>
 
@@ -728,8 +662,7 @@ const Profile: React.FC = () => {
                             <div className="text-white text-sm">
                                 {profile.favoriteGenres.length > 0
                                     ? profile.favoriteGenres.map(g => g.name).join(', ')
-                                    : '아직 선택하지 않음'
-                                }
+                                    : '아직 선택하지 않음'}
                             </div>
                         </div>
 
@@ -741,8 +674,7 @@ const Profile: React.FC = () => {
                             <div className="text-white text-sm">
                                 {profile.attendedFestivals.length > 0
                                     ? `${profile.attendedFestivals.length}개 페스티벌`
-                                    : '아직 선택하지 않음'
-                                }
+                                    : '아직 선택하지 않음'}
                             </div>
                         </div>
 
