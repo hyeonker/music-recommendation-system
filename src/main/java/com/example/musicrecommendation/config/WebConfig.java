@@ -1,4 +1,4 @@
-package com.musicrecommendation.config;
+package com.example.musicrecommendation.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;

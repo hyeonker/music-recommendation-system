@@ -1,6 +1,7 @@
+// frontend/src/pages/Profile.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { Save, Music, Search, X, Plus, Star, Heart, BarChart3 } from 'lucide-react';
-import axios from 'axios';
+import api from '../api/client';
 import { toast } from 'react-hot-toast';
 
 interface Artist {
@@ -9,7 +10,7 @@ interface Artist {
     image?: string;
     followers?: number;
     genres?: string[];
-    popularity?: number; // Spotify 0~100
+    popularity?: number;
     spotifyId?: string;
     spotifyUrl?: string;
 }
@@ -48,8 +49,8 @@ const Profile: React.FC = () => {
             moodPreferences: [],
             listeningFrequency: '',
             concertFrequency: '',
-            discoveryMethod: ''
-        }
+            discoveryMethod: '',
+        },
     });
 
     const [artistSearchQuery, setArtistSearchQuery] = useState('');
@@ -58,6 +59,9 @@ const Profile: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
 
     const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+    // ✅ 1) 중복 검색 취소용 AbortController
+    const abortRef = useRef<AbortController | null>(null);
 
     // --- 데이터셋 ---
     const availableGenres: Genre[] = [
@@ -100,7 +104,7 @@ const Profile: React.FC = () => {
         { id: 'reggaeton', name: 'Reggaeton', description: '레게톤' },
         { id: 'gospel', name: 'Gospel', description: '가스펠' },
         { id: 'newage', name: 'New Age', description: '뉴에이지' },
-        { id: 'soundtrack', name: 'Soundtrack', description: '사운드트랙' }
+        { id: 'soundtrack', name: 'Soundtrack', description: '사운드트랙' },
     ];
 
     const musicFestivals = [
@@ -129,7 +133,7 @@ const Profile: React.FC = () => {
         { id: 'primavera', name: 'Primavera Sound', location: '스페인 바르셀로나', type: 'Indie/Alternative' },
         { id: 'roskilde', name: 'Roskilde Festival', location: '덴마크', type: 'Multi-genre' },
         { id: 'exit', name: 'EXIT Festival', location: '세르비아', type: 'Electronic/Rock' },
-        { id: 'sziget', name: 'Sziget Festival', location: '헝가리 부다페스트', type: 'Multi-genre' }
+        { id: 'sziget', name: 'Sziget Festival', location: '헝가리 부다페스트', type: 'Multi-genre' },
     ];
 
     const moodOptions = [
@@ -140,7 +144,7 @@ const Profile: React.FC = () => {
         { value: 'romantic', label: '로맨틱' },
         { value: 'focus', label: '집중' },
         { value: 'workout', label: '운동' },
-        { value: 'party', label: '파티' }
+        { value: 'party', label: '파티' },
     ];
 
     const concertFrequencyOptions = [
@@ -148,7 +152,7 @@ const Profile: React.FC = () => {
         { value: 'few_months', label: '몇 달에 1회' },
         { value: 'yearly', label: '연 1-2회' },
         { value: 'rarely', label: '가끔' },
-        { value: 'never', label: '거의 안 감' }
+        { value: 'never', label: '거의 안 감' },
     ];
 
     const eraOptions = [
@@ -159,14 +163,14 @@ const Profile: React.FC = () => {
         { value: '80s', label: '80년대' },
         { value: '70s', label: '70년대' },
         { value: 'classic', label: '클래식' },
-        { value: 'mixed', label: '다양함' }
+        { value: 'mixed', label: '다양함' },
     ];
 
     const listeningFrequencyOptions = [
         { value: 'daily', label: '매일' },
         { value: 'few_times_week', label: '주 2-3회' },
         { value: 'weekly', label: '주 1회' },
-        { value: 'occasionally', label: '가끔' }
+        { value: 'occasionally', label: '가끔' },
     ];
 
     const discoveryMethodOptions = [
@@ -175,20 +179,32 @@ const Profile: React.FC = () => {
         { value: 'social_media', label: '소셜미디어' },
         { value: 'radio', label: '라디오' },
         { value: 'live_shows', label: '라이브 공연' },
-        { value: 'music_blogs', label: '음악 블로그' }
+        { value: 'music_blogs', label: '음악 블로그' },
     ];
 
-    // --- Spotify 검색 ---
+    // --- Spotify 검색 (요청 취소 + 로딩/결과없음 UX) ---
     const searchArtists = async (query: string) => {
         if (!query.trim()) { setSearchResults([]); return; }
+
+        // 이전 요청 취소
+        if (abortRef.current) abortRef.current.abort();
+        const controller = new AbortController();
+        abortRef.current = controller;
+
         try {
             setIsSearching(true);
-            const { data } = await axios.get('http://localhost:9090/api/spotify/search/artists', {
-                params: { q: query, limit: 3 }
+
+            const { data } = await api.get('/api/spotify/search/artists', {
+                params: { q: query, limit: 3 },
+                signal: controller.signal,
             });
+
             setSearchResults(data);
-            toast.success(`${data.length}개 아티스트 검색됨!`);
-        } catch (e) {
+        } catch (e: any) {
+            // 사용자가 입력을 바꿔서 취소된 경우는 무시
+            if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || e?.message === 'canceled') {
+                return;
+            }
             console.error('Spotify 검색 실패:', e);
             toast.error('검색에 실패했습니다.');
         } finally {
@@ -203,7 +219,7 @@ const Profile: React.FC = () => {
         }
         setProfile((prev: UserProfile) => ({
             ...prev,
-            favoriteArtists: [...prev.favoriteArtists, artist]
+            favoriteArtists: [...prev.favoriteArtists, artist],
         }));
         setArtistSearchQuery('');
         setSearchResults([]);
@@ -213,7 +229,7 @@ const Profile: React.FC = () => {
     const removeArtist = (artistId: string) => {
         setProfile((prev: UserProfile) => ({
             ...prev,
-            favoriteArtists: prev.favoriteArtists.filter((a: Artist) => a.id !== artistId)
+            favoriteArtists: prev.favoriteArtists.filter((a: Artist) => a.id !== artistId),
         }));
     };
 
@@ -242,17 +258,17 @@ const Profile: React.FC = () => {
                 ...prev.musicPreferences,
                 moodPreferences: prev.musicPreferences.moodPreferences.includes(mood)
                     ? prev.musicPreferences.moodPreferences.filter((m: string) => m !== mood)
-                    : [...prev.musicPreferences.moodPreferences, mood]
-            }
+                    : [...prev.musicPreferences.moodPreferences, mood],
+            },
         }));
     };
 
     const saveProfile = async () => {
         try {
             setIsSaving(true);
-            await axios.put(`http://localhost:9090/api/users/${profile.id}/profile`, profile);
+            await api.put(`/api/users/${profile.id}/profile`, profile);
             toast.success('프로필이 저장되었습니다!');
-        } catch (e) {
+        } catch (e: any) {
             console.error('프로필 저장 실패:', e);
             toast.error('프로필 저장에 실패했습니다');
         } finally {
@@ -261,42 +277,58 @@ const Profile: React.FC = () => {
     };
 
     // --- Effects ---
+    // 1) 입력 디바운스 후 검색
     useEffect(() => {
         const t = setTimeout(() => { if (artistSearchQuery) searchArtists(artistSearchQuery); }, 400);
         return () => clearTimeout(t);
     }, [artistSearchQuery]);
 
+    // 2) ESC로 검색창 닫기
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && searchResults.length) {
+            if (e.key === 'Escape' && (searchResults.length || isSearching)) {
                 setSearchResults([]);
                 setArtistSearchQuery('');
+                abortRef.current?.abort();
             }
         };
         document.addEventListener('keydown', onKey);
         return () => document.removeEventListener('keydown', onKey);
-    }, [searchResults.length]);
+    }, [searchResults.length, isSearching]);
 
+    // 3) 드롭다운 외부 클릭 닫기
     useEffect(() => {
         const onDown = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setSearchResults([]);
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setSearchResults([]);
+            }
         };
         document.addEventListener('mousedown', onDown);
         return () => document.removeEventListener('mousedown', onDown);
     }, []);
 
+    // 4) 언마운트 시 미해결 요청 취소
+    useEffect(() => {
+        return () => abortRef.current?.abort();
+    }, []);
+
+    // 5) 초기 프로필 로드 (eslint 경고 해결: profile.id 의존성 명시)
     useEffect(() => {
         (async () => {
             try {
-                const res = await axios.get(`http://localhost:9090/api/users/${profile.id}/profile`);
+                const res = await api.get(`/api/users/${profile.id}/profile`);
                 if (res.data) setProfile(res.data);
             } catch (e) {
                 console.log('프로필 로드 실패 (더미 데이터 사용):', e);
             }
         })();
-    }, []);
+    }, [profile.id]);
 
     // --- UI ---
+    // 드롭다운을 보여줄 조건: 입력이 있고 (로딩 중이거나 결과가 있거나 결과 없음 확정)
+    const shouldShowDropdown =
+        !!artistSearchQuery.trim() && (isSearching || searchResults.length >= 0);
+
     return (
         <div className="bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6 pb-12 relative">
             <div className="max-w-4xl mx-auto">
@@ -349,8 +381,8 @@ const Profile: React.FC = () => {
                             />
                         </div>
 
-                        {/* 검색 결과 드롭다운 */}
-                        {searchResults.length > 0 && (
+                        {/* 검색 결과 드롭다운 (로딩/결과/결과없음 포함) */}
+                        {shouldShowDropdown && (
                             <div
                                 ref={dropdownRef}
                                 className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-200 z-[200] max-h-96 overflow-hidden flex flex-col"
@@ -358,15 +390,25 @@ const Profile: React.FC = () => {
                                 <div className="flex justify-between items-center p-3 border-b bg-gradient-to-r from-blue-50 to-purple-50">
                                     <div>
                                         <h3 className="font-semibold text-gray-800 text-sm">아티스트 검색 결과</h3>
-                                        <p className="text-xs text-gray-600">{searchResults.length}개 결과</p>
+                                        <p className="text-xs text-gray-600">
+                                            {isSearching ? '로딩 중…' : `${searchResults.length}개 결과`}
+                                        </p>
                                     </div>
-                                    <button onClick={() => setSearchResults([])} className="text-gray-400 hover:text-gray-600 p-1 rounded-full">
+                                    <button onClick={() => { setSearchResults([]); setArtistSearchQuery(''); }} className="text-gray-400 hover:text-gray-600 p-1 rounded-full">
                                         <X className="h-4 w-4" />
                                     </button>
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto">
-                                    {searchResults.map((artist: Artist) => (
+                                    {isSearching && (
+                                        <div className="p-4 text-center text-sm text-gray-500">검색 중…</div>
+                                    )}
+
+                                    {!isSearching && searchResults.length === 0 && artistSearchQuery.trim() && (
+                                        <div className="p-4 text-center text-sm text-gray-500">결과가 없습니다</div>
+                                    )}
+
+                                    {!isSearching && searchResults.length > 0 && searchResults.map((artist: Artist) => (
                                         <div
                                             key={artist.id}
                                             onClick={() => addArtist(artist)}
@@ -407,7 +449,7 @@ const Profile: React.FC = () => {
                         )}
                     </div>
 
-                    {/* 선택된 아티스트들 (배지 포함) */}
+                    {/* 선택된 아티스트들 */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                         {profile.favoriteArtists.map((artist: Artist) => (
                             <div key={artist.id} className="relative group">
@@ -425,21 +467,15 @@ const Profile: React.FC = () => {
                                     />
                                     <div className="text-white text-sm font-medium">{artist.name}</div>
 
-                                    {/* 팔로워/인기도 배지 */}
                                     <div className="mt-2 flex flex-wrap justify-center gap-1">
                                         {typeof artist.followers === 'number' && (
-                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">
-                        팔로워 {artist.followers.toLocaleString()}명
-                      </span>
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">팔로워 {artist.followers.toLocaleString()}명</span>
                                         )}
                                         {typeof artist.popularity === 'number' && (
-                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">
-                        인기도 {artist.popularity}/100
-                      </span>
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">인기도 {artist.popularity}/100</span>
                                         )}
                                     </div>
 
-                                    {/* 장르 배지 (최대 3개) */}
                                     {artist.genres?.length ? (
                                         <div className="mt-2 flex flex-wrap justify-center gap-1">
                                             {artist.genres.slice(0, 3).map((g) => (
@@ -464,9 +500,7 @@ const Profile: React.FC = () => {
 
                 {/* 좋아하는 장르 */}
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
-                    <h2 className="text-xl font-bold text-white mb-4">
-                        좋아하는 장르 ({profile.favoriteGenres.length})
-                    </h2>
+                    <h2 className="text-xl font-bold text-white mb-4">좋아하는 장르 ({profile.favoriteGenres.length})</h2>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto">
                         {availableGenres.map((genre: Genre) => {
                             const isSelected = profile.favoriteGenres.find((g: Genre) => g.id === genre.id);
@@ -475,9 +509,7 @@ const Profile: React.FC = () => {
                                     key={genre.id}
                                     onClick={() => toggleGenre(genre)}
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        isSelected
-                                            ? 'bg-blue-600 text-white border-2 border-blue-400'
-                                            : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                                        isSelected ? 'bg-blue-600 text-white border-2 border-blue-400' : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
                                 >
                                     {genre.name}
@@ -489,9 +521,7 @@ const Profile: React.FC = () => {
 
                 {/* 참여한 음악 페스티벌 */}
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
-                    <h2 className="text-xl font-bold text-white mb-4">
-                        참여한 음악 페스티벌 ({profile.attendedFestivals.length})
-                    </h2>
+                    <h2 className="text-xl font-bold text-white mb-4">참여한 음악 페스티벌 ({profile.attendedFestivals.length})</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {musicFestivals.map((festival) => {
                             const isSelected = profile.attendedFestivals.includes(festival.id);
@@ -500,9 +530,7 @@ const Profile: React.FC = () => {
                                     key={festival.id}
                                     onClick={() => toggleFestival(festival.id)}
                                     className={`p-3 rounded-lg text-left transition-all ${
-                                        isSelected
-                                            ? 'bg-purple-600 text-white border-2 border-purple-400'
-                                            : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                                        isSelected ? 'bg-purple-600 text-white border-2 border-purple-400' : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
                                 >
                                     <div className="font-medium text-sm">{festival.name}</div>
@@ -528,7 +556,7 @@ const Profile: React.FC = () => {
                                     onClick={() =>
                                         setProfile((prev: UserProfile) => ({
                                             ...prev,
-                                            musicPreferences: { ...prev.musicPreferences, preferredEra: era.value }
+                                            musicPreferences: { ...prev.musicPreferences, preferredEra: era.value },
                                         }))
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
@@ -553,7 +581,7 @@ const Profile: React.FC = () => {
                                     onClick={() =>
                                         setProfile((prev: UserProfile) => ({
                                             ...prev,
-                                            musicPreferences: { ...prev.musicPreferences, listeningFrequency: freq.value }
+                                            musicPreferences: { ...prev.musicPreferences, listeningFrequency: freq.value },
                                         }))
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
@@ -578,7 +606,7 @@ const Profile: React.FC = () => {
                                     onClick={() =>
                                         setProfile((prev: UserProfile) => ({
                                             ...prev,
-                                            musicPreferences: { ...prev.musicPreferences, concertFrequency: freq.value }
+                                            musicPreferences: { ...prev.musicPreferences, concertFrequency: freq.value },
                                         }))
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
@@ -603,7 +631,7 @@ const Profile: React.FC = () => {
                                     onClick={() =>
                                         setProfile((prev: UserProfile) => ({
                                             ...prev,
-                                            musicPreferences: { ...prev.musicPreferences, discoveryMethod: method.value }
+                                            musicPreferences: { ...prev.musicPreferences, discoveryMethod: method.value },
                                         }))
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
@@ -631,9 +659,7 @@ const Profile: React.FC = () => {
                                         key={mood.value}
                                         onClick={() => toggleMood(mood.value)}
                                         className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                            isSelected
-                                                ? 'bg-pink-600 text-white border-2 border-pink-400'
-                                                : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                                            isSelected ? 'bg-pink-600 text-white border-2 border-pink-400' : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                         }`}
                                     >
                                         {mood.label}

@@ -1,22 +1,23 @@
+// src/main/java/com/example/musicrecommendation/config/AppConfig.java
 package com.example.musicrecommendation.config;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.client.RestTemplate;
+
+import java.time.Duration;
 
 @Configuration
-@EnableConfigurationProperties(SpotifyProperties.class) // ← 여기서만 등록
+@EnableConfigurationProperties(SpotifyConfig.class) // 여기서만 등록
 public class AppConfig {
 
-    // WebClient.Builder는 Spring Boot가 자동으로도 만들어주지만
-    // 명시적으로 써도 무방합니다.
     @Bean
-    public WebClient.Builder webClientBuilder() {
-        return WebClient.builder();
+    public RestTemplate restTemplate() {
+        var factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+        factory.setReadTimeout((int) Duration.ofSeconds(10).toMillis());
+        return new RestTemplate(factory);
     }
-
-    // ⚠️ 절대 이렇게 만들지 마세요:
-    // @Bean
-    // public SpotifyProperties spotifyProperties() { ... }  ← 이게 중복 원인
 }
