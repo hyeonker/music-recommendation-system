@@ -1,43 +1,40 @@
-### Gradle ###
-.gradle/
-build/
-!gradle/wrapper/gradle-wrapper.jar
-
-### IntelliJ IDEA ###
-.idea/
-*.iws
-*.iml
-*.ipr
-
-### Logs ###
+# Node / Frontend
+node_modules/
+frontend/node_modules/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-### OS Files ###
-.DS_Store
-Thumbs.db
 
-### Other ###
-out/
+# Build outputs
+build/
+dist/
+frontend/build/
+frontend/dist/
 
-# ── env files (Node/Vite/Spring 공통) ─────────────────────────────
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+
+# Env & Secrets (중요)
 .env
 .env.*
 *.env
-
-# 프론트엔드 예시(원하는 경로로 보강)
 frontend/.env
 frontend/.env.*
 
-# 백엔드(Spring) 설정 파일: 실제 키 들어있는 것들 전부 제외
+
+# Spring Boot Secrets (중요)
 **/application.yml
 **/application.yaml
 **/application-*.yml
 **/application-*.yaml
 
-# IDE/빌드 산출물 등
-.idea/
-*.iml
-target/
-build/
-dist/
-node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
