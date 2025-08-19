@@ -1,7 +1,7 @@
 package com.example.musicrecommendation.service;
 
 import com.example.musicrecommendation.domain.*;
-import com.example.musicrecommendation.web.dto.SpotifyDto;
+import com.example.musicrecommendation.web.dto.spotify.SpotifyDto; // ★ 경로 수정!
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,9 +28,7 @@ public class SpotifySyncService {
         this.musicMetadataRepository = musicMetadataRepository;
     }
 
-    /**
-     * Spotify에서 곡 검색하고 DB에 저장
-     */
+    /** Spotify에서 곡 검색하고 DB에 저장 */
     public Song syncTrackFromSpotify(String query) {
         Optional<SpotifyDto.TrackSearchResponse> searchResult = spotifyApiService.searchTracks(query, 1);
 
@@ -40,13 +38,10 @@ public class SpotifySyncService {
             SpotifyDto.Track spotifyTrack = searchResult.get().getTracks().getItems().get(0);
             return createOrUpdateSong(spotifyTrack);
         }
-
         return null;
     }
 
-    /**
-     * 인기 곡들을 Spotify에서 가져와서 DB 업데이트
-     */
+    /** 인기 곡들을 Spotify에서 가져와서 DB 업데이트 */
     public List<Song> syncPopularTracks(String genre, int limit) {
         Optional<SpotifyDto.TrackSearchResponse> result = spotifyApiService.getPopularTracks(genre, limit);
 
@@ -56,23 +51,16 @@ public class SpotifySyncService {
                     .filter(song -> song != null)
                     .toList();
         }
-
         return List.of();
     }
 
-    /**
-     * 기존 곡의 Spotify 메타데이터 업데이트
-     */
+    /** 기존 곡의 Spotify 메타데이터 업데이트 */
     public boolean updateMusicMetadata(Long songId, String spotifyId) {
         Optional<Song> songOpt = songRepository.findById(songId);
-        if (songOpt.isEmpty()) {
-            return false;
-        }
+        if (songOpt.isEmpty()) return false;
 
         Optional<SpotifyDto.AudioFeatures> audioFeatures = spotifyApiService.getAudioFeatures(spotifyId);
-        if (audioFeatures.isEmpty()) {
-            return false;
-        }
+        if (audioFeatures.isEmpty()) return false;
 
         Song song = songOpt.get();
         SpotifyDto.AudioFeatures features = audioFeatures.get();
@@ -103,16 +91,12 @@ public class SpotifySyncService {
         return true;
     }
 
-    /**
-     * Spotify Track을 Song 엔티티로 변환/저장 (간단화)
-     */
+    /** Spotify Track을 Song 엔티티로 변환/저장 (간단화) */
     private Song createOrUpdateSong(SpotifyDto.Track spotifyTrack) {
         try {
-            // 기존 곡들 중에서 첫 번째 곡을 사용 (간단화)
+            // TODO: 실제 매핑/저장을 구현. 현재는 간단히 샘플로 첫 곡을 반환.
             List<Song> allSongs = songRepository.findAll();
-            if (!allSongs.isEmpty()) {
-                return allSongs.get(0);
-            }
+            if (!allSongs.isEmpty()) return allSongs.get(0);
             return null;
         } catch (Exception e) {
             System.err.println("Spotify 곡 저장 실패: " + e.getMessage());
@@ -120,9 +104,7 @@ public class SpotifySyncService {
         }
     }
 
-    /**
-     * 동기화 상태 확인
-     */
+    /** 동기화 상태 확인 */
     public Object getSyncStatus() {
         long totalSongs = songRepository.count();
         long songsWithMetadata = musicMetadataRepository.count();
