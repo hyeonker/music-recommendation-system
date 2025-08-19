@@ -18,3 +18,26 @@ Thumbs.db
 
 ### Other ###
 out/
+
+# ── env files (Node/Vite/Spring 공통) ─────────────────────────────
+.env
+.env.*
+*.env
+
+# 프론트엔드 예시(원하는 경로로 보강)
+frontend/.env
+frontend/.env.*
+
+# 백엔드(Spring) 설정 파일: 실제 키 들어있는 것들 전부 제외
+**/application.yml
+**/application.yaml
+**/application-*.yml
+**/application-*.yaml
+
+# IDE/빌드 산출물 등
+.idea/
+*.iml
+target/
+build/
+dist/
+node_modules/
