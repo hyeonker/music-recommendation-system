@@ -76,9 +76,9 @@ dependencies {
     // ---------- testRuntimeOnly ----------
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    // (보안 붙일 때)
-    // implementation("org.springframework.boot:spring-boot-starter-security")
-    // implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
+    // 보안
+     implementation("org.springframework.boot:spring-boot-starter-security")
+     implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
     // implementation("io.jsonwebtoken:jjwt-api:$jwtVersion")
     // runtimeOnly("io.jsonwebtoken:jjwt-impl:$jwtVersion")
     // runtimeOnly("io.jsonwebtoken:jjwt-jackson:$jwtVersion")
