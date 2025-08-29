@@ -7,6 +7,8 @@ import {
     fetchProfile as apiFetchProfile,
     saveProfile as apiSaveProfile,
     fetchMe,
+    fetchMyBasicInfo,
+    updateMyBasicInfo,
 } from '../api/userProfile';
 
 interface Artist {
@@ -316,6 +318,8 @@ const Profile: React.FC = () => {
     const onSaveProfile = async () => {
         try {
             setIsSaving(true);
+            
+            // 1. 프로필 데이터 저장
             const payload = {
                 userId,
                 favoriteArtists: profile.favoriteArtists,
@@ -324,6 +328,12 @@ const Profile: React.FC = () => {
                 musicPreferences: profile.musicPreferences,
             };
             const saved = await apiSaveProfile(userId, payload);
+            
+            // 2. 기본 사용자 정보(이름) 저장
+            if (profile.name) {
+                await updateMyBasicInfo(profile.name);
+            }
+            
             // saved는 ServerProfile 타입이므로 as any로 합치고 normalize로 보정
             setProfile((prev) => normalizeProfile({ ...prev, ...(saved as any) }, userId));
             toast.success('프로필이 저장되었습니다!');
@@ -353,13 +363,26 @@ const Profile: React.FC = () => {
         })();
     }, []);
 
-    // 2) userId가 정해지면 서버에서 프로필 fetch
+    // 2) userId가 정해지면 서버에서 프로필과 사용자 기본 정보를 모두 fetch
     useEffect(() => {
         if (!userId) return;
         (async () => {
             try {
-                const data = await apiFetchProfile(userId);
-                setProfile((prev) => normalizeProfile({ ...prev, ...(data as any), id: userId }, userId));
+                // 프로필 정보와 기본 사용자 정보를 병렬로 가져오기
+                const [profileData, basicInfo] = await Promise.all([
+                    apiFetchProfile(userId),
+                    fetchMyBasicInfo().catch(() => null) // 실패해도 계속 진행
+                ]);
+                
+                // 기본 정보에서 실제 이름을 가져와서 사용
+                const actualName = basicInfo?.name || '뮤직러버'; // fallback
+                
+                setProfile((prev) => normalizeProfile({ 
+                    ...prev, 
+                    ...(profileData as any), 
+                    id: userId,
+                    name: actualName 
+                }, userId));
             } catch (e) {
                 console.log('프로필 로드 실패 (초기값 사용):', e);
                 setProfile((prev) => normalizeProfile(prev, userId));

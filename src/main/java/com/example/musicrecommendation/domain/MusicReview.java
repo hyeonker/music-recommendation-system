@@ -13,7 +13,7 @@ import java.util.List;
 @Table(name = "music_reviews")
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
-@EqualsAndHashCode(of = {"userId", "musicItem"})
+@EqualsAndHashCode(of = "id")
 public class MusicReview {
     
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -22,7 +22,7 @@ public class MusicReview {
     @Column(name = "user_id", nullable = false)
     private Long userId;
     
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "music_item_id", nullable = false)
     private MusicItem musicItem;
     
@@ -33,9 +33,7 @@ public class MusicReview {
     @Column(name = "review_text", columnDefinition = "text")
     private String reviewText;
     
-    @ElementCollection
-    @CollectionTable(name = "review_tags", joinColumns = @JoinColumn(name = "review_id"))
-    @Column(name = "tag")
+    @Column(name = "tags", columnDefinition = "text[]")
     private List<String> tags;
     
     @Column(name = "is_spoiler")

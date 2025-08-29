@@ -16,7 +16,7 @@ import java.util.Map;
 @Table(name = "music_items")
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
-@EqualsAndHashCode(of = {"externalId", "itemType"})
+@EqualsAndHashCode(of = "id")
 public class MusicItem {
     
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)

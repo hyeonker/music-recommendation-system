@@ -13,9 +13,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -186,5 +189,88 @@ public class UserController {
     public ResponseEntity<Long> getUserCount() {
         long count = userService.getTotalUserCount();
         return ResponseEntity.ok(count);
+    }
+    
+    /**
+     * 현재 로그인한 사용자 정보 조회
+     */
+    @GetMapping("/me")
+    @Operation(summary = "내 정보 조회", description = "현재 로그인한 사용자의 정보를 조회합니다.")
+    public ResponseEntity<UserResponse> getMyInfo(@AuthenticationPrincipal OAuth2User oauth2User) {
+        if (oauth2User == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+        if (email == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        
+        return userService.findUserByEmail(email)
+                .map(user -> ResponseEntity.ok(UserResponse.from(user)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+    
+    /**
+     * 현재 로그인한 사용자의 기본 정보 수정
+     */
+    @PutMapping("/me")
+    @Operation(summary = "내 정보 수정", description = "현재 로그인한 사용자의 이름을 수정합니다.")
+    public ResponseEntity<UserResponse> updateMyInfo(
+            @RequestBody Map<String, String> request,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        if (oauth2User == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+        if (email == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        
+        String newName = request.get("name");
+        if (newName == null || newName.trim().isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+        
+        try {
+            User user = userService.findUserByEmail(email)
+                    .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다"));
+                    
+            User updatedUser = userService.updateUserProfile(
+                    user.getId(),
+                    newName.trim(),
+                    user.getProfileImageUrl()
+            );
+            
+            return ResponseEntity.ok(UserResponse.from(updatedUser));
+            
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+    
+    private String extractEmailFromOAuth2User(Map<String, Object> attrs) {
+        // Google 로그인의 경우
+        if (attrs.containsKey("sub")) {
+            return (String) attrs.get("email");
+        }
+        // Kakao 로그인의 경우  
+        else if (attrs.containsKey("id")) {
+            Map<String, Object> account = (Map<String, Object>) attrs.get("kakao_account");
+            if (account != null) {
+                return (String) account.get("email");
+            }
+        }
+        // Naver 로그인의 경우
+        else if (attrs.containsKey("response")) {
+            Map<String, Object> response = (Map<String, Object>) attrs.get("response");
+            if (response != null) {
+                return (String) response.get("email");
+            }
+        }
+        
+        return null;
     }
 }

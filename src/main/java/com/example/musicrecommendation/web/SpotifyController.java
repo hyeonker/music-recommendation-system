@@ -3,6 +3,7 @@ package com.example.musicrecommendation.web;
 
 import com.example.musicrecommendation.service.SpotifyService;
 import com.example.musicrecommendation.web.dto.spotify.ArtistDto;
+import com.example.musicrecommendation.web.dto.spotify.TrackDto;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -39,6 +40,26 @@ public class SpotifyController {
 
         // 4) 서비스 호출
         return spotifyService.searchArtists(query, safeLimit);
+    }
+
+    /**
+     * 트랙 검색
+     * 예) GET /api/spotify/search/tracks?q=Dynamite&limit=3
+     */
+    @GetMapping("/search/tracks")
+    public List<TrackDto> searchTracks(
+            @RequestParam(name = "q", required = false) String q,
+            @RequestParam(name = "limit", defaultValue = "3") int limit
+    ) {
+        String query = (q == null) ? "" : q.trim();
+
+        if (query.isEmpty()) {
+            return List.of();
+        }
+
+        int safeLimit = Math.max(1, Math.min(limit, 10));
+
+        return spotifyService.searchTracks(query, safeLimit);
     }
 
     /**

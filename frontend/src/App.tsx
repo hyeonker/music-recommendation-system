@@ -10,6 +10,7 @@ import Matching from './pages/Matching';
 import Chat from './pages/Chat';
 import Stats from './pages/Stats';
 import Profile from './pages/Profile';
+import Reviews from './pages/Reviews';
 import LoadingSpinner from './components/LoadingSpinner';
 import RequireAuth from './components/RequireAuth';   // ⭐ 추가: 로그인 가드
 import SocialAuth from './components/SocialAuth';     // ⭐ 선택: /login 전용 페이지에서 사용
@@ -97,6 +98,7 @@ function App() {
                                         <Route path="/matching" element={<Matching />} />
                                         <Route path="/chat" element={<Chat />} />
                                         <Route path="/stats" element={<Stats />} />
+                                        <Route path="/reviews" element={<Reviews />} />
 
                                         {/* ⭐ 로그인 필요: /profile */}
                                         <Route

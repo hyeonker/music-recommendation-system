@@ -32,3 +32,15 @@ export const fetchMe = async () => {
     const { data } = await api.get('/api/auth/me');
     return data; // { authenticated: boolean, user?: { id, name, email, ... } }
 };
+
+// 현재 사용자의 기본 정보 가져오기
+export const fetchMyBasicInfo = async () => {
+    const { data } = await api.get('/api/users/me');
+    return data;
+};
+
+// 현재 사용자의 기본 정보 수정
+export const updateMyBasicInfo = async (name: string) => {
+    const { data } = await api.put('/api/users/me', { name });
+    return data;
+};

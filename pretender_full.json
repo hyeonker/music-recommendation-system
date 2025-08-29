@@ -1,0 +1,134 @@
+[
+    {
+        "id": "2YBAasP4UclvPt5HyuYlYD",
+        "name": "Pretender",
+        "href": "https://api.spotify.com/v1/tracks/2YBAasP4UclvPt5HyuYlYD",
+        "popularity": 52,
+        "durationMs": null,
+        "explicit": false,
+        "previewUrl": null,
+        "trackNumber": null,
+        "type": "track",
+        "uri": "spotify:track:2YBAasP4UclvPt5HyuYlYD",
+        "isLocal": null,
+        "artists": [
+            {
+                "id": "03uMw43UVu9MsQCcHVSGjX",
+                "name": "Alice Phoebe Lou",
+                "image": null,
+                "followers": null,
+                "genres": null,
+                "popularity": 62,
+                "spotifyUrl": "https://open.spotify.com/artist/03uMw43UVu9MsQCcHVSGjX"
+            }
+        ],
+        "album": {
+            "id": "4hz0oN2yAGTyrESmYZyQLC",
+            "name": "Pretender",
+            "albumType": null,
+            "totalTracks": null,
+            "availableMarkets": null,
+            "href": null,
+            "images": [
+                {
+                    "url": "https://i.scdn.co/image/ab67616d0000b27323b4c168c185bdf087fc76e2",
+                    "height": 640,
+                    "width": 640
+                },
+                {
+                    "url": "https://i.scdn.co/image/ab67616d00001e0223b4c168c185bdf087fc76e2",
+                    "height": 300,
+                    "width": 300
+                },
+                {
+                    "url": "https://i.scdn.co/image/ab67616d0000485123b4c168c185bdf087fc76e2",
+                    "height": 64,
+                    "width": 64
+                }
+            ],
+            "releaseDate": null,
+            "releaseDatePrecision": null,
+            "type": null,
+            "uri": null,
+            "artists": [
+                {
+                    "id": "03uMw43UVu9MsQCcHVSGjX",
+                    "name": "Alice Phoebe Lou",
+                    "image": null,
+                    "followers": null,
+                    "genres": null,
+                    "popularity": null,
+                    "spotifyUrl": "https://open.spotify.com/artist/03uMw43UVu9MsQCcHVSGjX"
+                }
+            ]
+        },
+        "spotifyUrl": null,
+        "image": "https://i.scdn.co/image/ab67616d0000b27323b4c168c185bdf087fc76e2"
+    },
+    {
+        "id": "1OBAWkIciXl8rmbKtrp9ZG",
+        "name": "Pretender",
+        "href": "https://api.spotify.com/v1/tracks/1OBAWkIciXl8rmbKtrp9ZG",
+        "popularity": 49,
+        "durationMs": null,
+        "explicit": false,
+        "previewUrl": null,
+        "trackNumber": null,
+        "type": "track",
+        "uri": "spotify:track:1OBAWkIciXl8rmbKtrp9ZG",
+        "isLocal": null,
+        "artists": [
+            {
+                "id": "5Vo1hnCRmCM6M4thZCInCj",
+                "name": "OFFICIAL HIGE DANDISM",
+                "image": null,
+                "followers": null,
+                "genres": null,
+                "popularity": 59,
+                "spotifyUrl": "https://open.spotify.com/artist/5Vo1hnCRmCM6M4thZCInCj"
+            }
+        ],
+        "album": {
+            "id": "6pzSASkTphCDCGIvFMql2b",
+            "name": "Pretender",
+            "albumType": null,
+            "totalTracks": null,
+            "availableMarkets": null,
+            "href": null,
+            "images": [
+                {
+                    "url": "https://i.scdn.co/image/ab67616d0000b273adc1971ac6f0bb1a83cff2b7",
+                    "height": 640,
+                    "width": 640
+                },
+                {
+                    "url": "https://i.scdn.co/image/ab67616d00001e02adc1971ac6f0bb1a83cff2b7",
+                    "height": 300,
+                    "width": 300
+                },
+                {
+                    "url": "https://i.scdn.co/image/ab67616d00004851adc1971ac6f0bb1a83cff2b7",
+                    "height": 64,
+                    "width": 64
+                }
+            ],
+            "releaseDate": null,
+            "releaseDatePrecision": null,
+            "type": null,
+            "uri": null,
+            "artists": [
+                {
+                    "id": "5Vo1hnCRmCM6M4thZCInCj",
+                    "name": "OFFICIAL HIGE DANDISM",
+                    "image": null,
+                    "followers": null,
+                    "genres": null,
+                    "popularity": null,
+                    "spotifyUrl": "https://open.spotify.com/artist/5Vo1hnCRmCM6M4thZCInCj"
+                }
+            ]
+        },
+        "spotifyUrl": null,
+        "image": "https://i.scdn.co/image/ab67616d0000b273adc1971ac6f0bb1a83cff2b7"
+    }
+]

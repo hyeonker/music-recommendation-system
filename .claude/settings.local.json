@@ -3,7 +3,11 @@
     "allow": [
       "Bash(cmd /c:*)",
       "Bash(./gradlew:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(/dev/null)",
+      "Bash(docker start:*)",
+      "Bash(docker run:*)",
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []

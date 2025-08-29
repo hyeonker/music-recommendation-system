@@ -42,3 +42,48 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+// 리뷰 API
+export const reviewApi = {
+  getRecentReviews: (page = 0, size = 20) => 
+    api.get(`/api/reviews/recent?page=${page}&size=${size}`),
+  
+  getHelpfulReviews: (page = 0, size = 20) => 
+    api.get(`/api/reviews/helpful?page=${page}&size=${size}`),
+  
+  getMyReviews: (page = 0, size = 20) => 
+    api.get(`/api/reviews/my?page=${page}&size=${size}`),
+  
+  createReview: (data: any) => 
+    api.post('/api/reviews', data),
+  
+  updateReview: (reviewId: number, data: any) => 
+    api.put(`/api/reviews/${reviewId}`, data),
+  
+  deleteReview: (reviewId: number) => 
+    api.delete(`/api/reviews/${reviewId}`),
+  
+  markHelpful: (reviewId: number) => 
+    api.post(`/api/reviews/${reviewId}/helpful`),
+  
+  getMusicItemRating: (musicItemId: number) => 
+    api.get(`/api/reviews/music-item/${musicItemId}/rating`),
+  
+  searchReviews: (filters: any) => 
+    api.post('/api/reviews/search', filters),
+};
+
+// 배지 API
+export const badgeApi = {
+  getMyBadges: () => 
+    api.get('/api/badges/my'),
+  
+  getUserBadges: (userId: number) => 
+    api.get(`/api/badges/user/${userId}`),
+  
+  getMyBadgeProfile: () => 
+    api.get('/api/badges/my/profile'),
+  
+  getBadgeStatistics: () => 
+    api.get('/api/badges/statistics'),
+};
