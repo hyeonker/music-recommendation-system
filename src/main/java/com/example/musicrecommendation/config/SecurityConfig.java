@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -35,28 +36,38 @@ public class SecurityConfig {
         http
                 // 🔐 엔드포인트 접근 제어
                 .authorizeHttpRequests(auth -> auth
-                        // ✅ 완전 공개
                         .requestMatchers(
                                 "/", "/error",
-                                "/ws/**", "/ws-native/**",          // WebSocket Handshake
-                                "/oauth2/**", "/login/**",          // OAuth2 흐름
-                                "/api/auth/**",                     // 로그인 상태 확인/로그아웃
-                                "/api/public/**",                   // 공개 API가 있다면 여기로
+                                "/favicon.ico",               // 파비콘 404 소음 제거
+                                "/ws/**", "/ws-native/**",    // SockJS/WS 핸드셰이크 & 폴링
+                                "/oauth2/**", "/login/**",
+                                "/api/auth/**",
+                                "/api/public/**",
+                                "/api/realtime-matching/**",  // 매칭 API 허용
+                                "/api/chat/**",               // 채팅 API 허용
+                                "/api/user-profile/**",       // 프로필 API 허용
+                                "/api/users/**",              // 사용자 API 허용
+                                "/api/spotify/**",            // Spotify API 허용
                                 "/actuator/**",
                                 "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**"
                         ).permitAll()
-
-                        // (필요 시) 공개 GET API 예시 — 주석 해제해서 사용
-                        // .requestMatchers(HttpMethod.GET, "/api/spotify/**").permitAll()
-
-                        // 그 외 나머지는 인증 필요
                         .anyRequest().authenticated()
                 )
-                // 개발 단계: CSRF 비활성(세션/OAuth 조합일 때 폼 POST 아니면 보통 이렇게 둠)
-                .csrf(csrf -> csrf.disable())
-                .cors(Customizer.withDefaults())
 
-                // ✅ OAuth2 로그인: 사용자 정보 로딩 + 성공 시 프론트로 리다이렉트
+                // 🛡️ CSRF는 켜두되 SockJS 경로만 예외 처리 (xhr_send 등 POST 보호 회피)
+                .csrf(csrf -> csrf.ignoringRequestMatchers(
+                        new AntPathRequestMatcher("/ws/**"),
+                        new AntPathRequestMatcher("/ws-native/**"),
+                        new AntPathRequestMatcher("/api/realtime-matching/**"),
+                        new AntPathRequestMatcher("/api/chat/**"),
+                        new AntPathRequestMatcher("/api/user-profile/**"),
+                        new AntPathRequestMatcher("/api/users/**"),
+                        new AntPathRequestMatcher("/api/spotify/**")
+                ))
+
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
+                // ✅ OAuth2 로그인
                 .oauth2Login(oauth -> oauth
                         .userInfoEndpoint(u -> u.userService(customOAuth2UserService))
                         .successHandler(successHandler)
@@ -68,7 +79,8 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cors = new CorsConfiguration();
-        cors.setAllowedOrigins(List.of(allowedOrigin)); // http://localhost:3000
+        // 예: http://localhost:3000
+        cors.setAllowedOrigins(List.of(allowedOrigin));
         cors.setAllowedMethods(Arrays.asList("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
         cors.setAllowedHeaders(List.of("*"));
         cors.setAllowCredentials(true);

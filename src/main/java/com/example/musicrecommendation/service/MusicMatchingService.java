@@ -20,17 +20,20 @@ public class MusicMatchingService {
     private final UserSongLikeRepository userSongLikeRepository;
     private final UserPreferenceService userPreferenceService;
     private final MusicSimilarityService musicSimilarityService;
+    private final NotificationService notificationService;
 
     public MusicMatchingService(UserRepository userRepository,
                                 UserMatchRepository userMatchRepository,
                                 UserSongLikeRepository userSongLikeRepository,
                                 UserPreferenceService userPreferenceService,
-                                MusicSimilarityService musicSimilarityService) {
+                                MusicSimilarityService musicSimilarityService,
+                                NotificationService notificationService) {
         this.userRepository = userRepository;
         this.userMatchRepository = userMatchRepository;
         this.userSongLikeRepository = userSongLikeRepository;
         this.userPreferenceService = userPreferenceService;
         this.musicSimilarityService = musicSimilarityService;
+        this.notificationService = notificationService;
     }
 
     /**
@@ -98,7 +101,17 @@ public class MusicMatchingService {
         int commonLikedSongs = calculateCommonLikedSongs(user1Id, user2Id);
         match.setCommonLikedSongs(commonLikedSongs);
 
-        return userMatchRepository.save(match);
+        var savedMatch = userMatchRepository.save(match);
+        
+        // 매칭 알림 전송 (비동기)
+        try {
+            notificationService.sendMatchNotification(user1Id, user2Id, similarity, reason);
+            notificationService.sendMatchNotification(user2Id, user1Id, similarity, reason);
+        } catch (Exception e) {
+            // 알림 전송 실패해도 매칭 생성은 성공으로 처리
+        }
+        
+        return savedMatch;
     }
 
     /**

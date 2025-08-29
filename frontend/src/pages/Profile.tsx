@@ -3,6 +3,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Save, Music, Search, X, Plus, Star, Heart, BarChart3 } from 'lucide-react';
 import api from '../api/client';
 import { toast } from 'react-hot-toast';
+import {
+    fetchProfile as apiFetchProfile,
+    saveProfile as apiSaveProfile,
+    fetchMe,
+} from '../api/userProfile';
 
 interface Artist {
     id: string;
@@ -22,7 +27,7 @@ interface Genre {
 }
 
 interface UserProfile {
-    id: number;
+    id: number; // 화면용 id == 서버 userId
     name: string;
     email?: string | null;
     favoriteArtists: Artist[];
@@ -37,10 +42,13 @@ interface UserProfile {
     };
 }
 
-/** 가져온 프로필을 안전한 기본값으로 보정 */
-const normalizeProfile = (p: Partial<UserProfile> | null | undefined): UserProfile => {
+/** 서버/화면 데이터를 안전한 기본값으로 보정 */
+const normalizeProfile = (
+    p: Partial<UserProfile> | null | undefined,
+    fallbackUserId: number = 1
+): UserProfile => {
     const base: UserProfile = {
-        id: 1,
+        id: fallbackUserId,
         name: '뮤직러버',
         email: null,
         favoriteArtists: [],
@@ -73,7 +81,7 @@ const normalizeProfile = (p: Partial<UserProfile> | null | undefined): UserProfi
     };
 };
 
-/** 어떤 응답이 와도 Artist 배열로 만들어 주는 정규화 함수 */
+/** 어떤 응답이 와도 Artist[]로 정규화 */
 const toArtistArray = (data: any): Artist[] => {
     if (Array.isArray(data)) return data;
     if (Array.isArray(data?.items)) return data.items;
@@ -83,12 +91,18 @@ const toArtistArray = (data: any): Artist[] => {
 };
 
 const Profile: React.FC = () => {
-    const [profile, setProfile] = useState<UserProfile>(normalizeProfile(null));
+    // ⭐ 로그인 사용자 ID 별도 관리
+    const [userId, setUserId] = useState<number>(1);
+    const [profile, setProfile] = useState<UserProfile>(normalizeProfile(null, userId));
+
+    // 검색/저장/로딩 상태
     const [artistSearchQuery, setArtistSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<Artist[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
+    // 드롭다운/요청 취소 refs
     const dropdownRef = useRef<HTMLDivElement | null>(null);
     const abortRef = useRef<AbortController | null>(null);
 
@@ -99,7 +113,7 @@ const Profile: React.FC = () => {
         { id: 'rock', name: 'Rock', description: '록 음악' },
         { id: 'alternative', name: 'Alternative', description: '얼터너티브 록' },
         { id: 'indie', name: 'Indie', description: '인디 음악' },
-        { id: 'hiphop', name: 'Hip-Hop', description: '힙합' },
+        { id: 'hiphop', name: 'Hip-Hop', description: '핍합' },
         { id: 'rap', name: 'Rap', description: '랩' },
         { id: 'rnb', name: 'R&B', description: '알앤비' },
         { id: 'soul', name: 'Soul', description: '소울' },
@@ -211,9 +225,12 @@ const Profile: React.FC = () => {
         { value: 'music_blogs', label: '음악 블로그' },
     ];
 
-    // --- Spotify 검색 (요청 취소 + 로딩/결과없음 UX) ---
+    // --- Spotify 검색 (취소/로딩/결과없음 UX) ---
     const searchArtists = async (query: string) => {
-        if (!query.trim()) { setSearchResults([]); return; }
+        if (!query.trim()) {
+            setSearchResults([]);
+            return;
+        }
 
         if (abortRef.current) abortRef.current.abort();
         const controller = new AbortController();
@@ -225,7 +242,7 @@ const Profile: React.FC = () => {
                 params: { q: query, limit: 3 },
                 signal: controller.signal,
             });
-            setSearchResults(toArtistArray(data)); // ← 항상 배열로 정규화
+            setSearchResults(toArtistArray(data));
         } catch (e: any) {
             if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || e?.message === 'canceled') return;
             console.error('Spotify 검색 실패:', e);
@@ -241,30 +258,31 @@ const Profile: React.FC = () => {
             toast.error('이미 추가된 아티스트입니다');
             return;
         }
-        setProfile((prev) => normalizeProfile({
-            ...prev,
-            favoriteArtists: [...(prev.favoriteArtists ?? []), artist],
-        }));
+        setProfile((prev) =>
+            normalizeProfile({ ...prev, favoriteArtists: [...(prev.favoriteArtists ?? []), artist] }, userId)
+        );
         setArtistSearchQuery('');
         setSearchResults([]);
         toast.success(`${artist.name}이(가) 추가되었습니다`);
     };
 
     const removeArtist = (artistId: string) => {
-        setProfile((prev) => normalizeProfile({
-            ...prev,
-            favoriteArtists: (prev.favoriteArtists ?? []).filter((a) => a.id !== artistId),
-        }));
+        setProfile((prev) =>
+            normalizeProfile(
+                { ...prev, favoriteArtists: (prev.favoriteArtists ?? []).filter((a) => a.id !== artistId) },
+                userId
+            )
+        );
     };
 
     const toggleGenre = (genre: Genre) => {
         setProfile((prev) => {
             const list = prev.favoriteGenres ?? [];
             const exists = list.find((g) => g.id === genre.id);
-            return normalizeProfile({
-                ...prev,
-                favoriteGenres: exists ? list.filter((g) => g.id !== genre.id) : [...list, genre],
-            });
+            return normalizeProfile(
+                { ...prev, favoriteGenres: exists ? list.filter((g) => g.id !== genre.id) : [...list, genre] },
+                userId
+            );
         });
     };
 
@@ -272,29 +290,42 @@ const Profile: React.FC = () => {
         setProfile((prev) => {
             const list = prev.attendedFestivals ?? [];
             const exists = list.includes(festivalId);
-            return normalizeProfile({
-                ...prev,
-                attendedFestivals: exists ? list.filter((id) => id !== festivalId) : [...list, festivalId],
-            });
+            return normalizeProfile(
+                { ...prev, attendedFestivals: exists ? list.filter((id) => id !== festivalId) : [...list, festivalId] },
+                userId
+            );
         });
     };
 
     const toggleMood = (mood: string) => {
         setProfile((prev) => {
-            const mp = prev.musicPreferences ?? { preferredEra: '', moodPreferences: [], listeningFrequency: '', concertFrequency: '', discoveryMethod: '' };
+            const mp =
+                prev.musicPreferences ?? {
+                    preferredEra: '',
+                    moodPreferences: [],
+                    listeningFrequency: '',
+                    concertFrequency: '',
+                    discoveryMethod: '',
+                };
             const moods = mp.moodPreferences ?? [];
             const next = moods.includes(mood) ? moods.filter((m) => m !== mood) : [...moods, mood];
-            return normalizeProfile({
-                ...prev,
-                musicPreferences: { ...mp, moodPreferences: next },
-            });
+            return normalizeProfile({ ...prev, musicPreferences: { ...mp, moodPreferences: next } }, userId);
         });
     };
 
-    const saveProfile = async () => {
+    const onSaveProfile = async () => {
         try {
             setIsSaving(true);
-            await api.put(`/api/users/${profile.id}/profile`, profile);
+            const payload = {
+                userId,
+                favoriteArtists: profile.favoriteArtists,
+                favoriteGenres: profile.favoriteGenres,
+                attendedFestivals: profile.attendedFestivals,
+                musicPreferences: profile.musicPreferences,
+            };
+            const saved = await apiSaveProfile(userId, payload);
+            // saved는 ServerProfile 타입이므로 as any로 합치고 normalize로 보정
+            setProfile((prev) => normalizeProfile({ ...prev, ...(saved as any) }, userId));
             toast.success('프로필이 저장되었습니다!');
         } catch (e: any) {
             console.error('프로필 저장 실패:', e);
@@ -305,11 +336,48 @@ const Profile: React.FC = () => {
     };
 
     // --- Effects ---
+
+    // 1) 로그인 사용자 ID 가져오기
     useEffect(() => {
-        const t = setTimeout(() => { if (artistSearchQuery) searchArtists(artistSearchQuery); }, 400);
+        (async () => {
+            try {
+                const me = await fetchMe(); // { authenticated, user?: { id, ... } }
+                if (me?.authenticated && me?.user?.id) {
+                    setUserId(me.user.id);
+                } else {
+                    setUserId(1);
+                }
+            } catch {
+                setUserId(1);
+            }
+        })();
+    }, []);
+
+    // 2) userId가 정해지면 서버에서 프로필 fetch
+    useEffect(() => {
+        if (!userId) return;
+        (async () => {
+            try {
+                const data = await apiFetchProfile(userId);
+                setProfile((prev) => normalizeProfile({ ...prev, ...(data as any), id: userId }, userId));
+            } catch (e) {
+                console.log('프로필 로드 실패 (초기값 사용):', e);
+                setProfile((prev) => normalizeProfile(prev, userId));
+            } finally {
+                setIsLoading(false);
+            }
+        })();
+    }, [userId]);
+
+    // 검색 디바운스
+    useEffect(() => {
+        const t = setTimeout(() => {
+            if (artistSearchQuery) searchArtists(artistSearchQuery);
+        }, 400);
         return () => clearTimeout(t);
     }, [artistSearchQuery]);
 
+    // ESC로 드롭다운/검색 취소
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key === 'Escape' && (searchResults.length || isSearching)) {
@@ -322,6 +390,7 @@ const Profile: React.FC = () => {
         return () => document.removeEventListener('keydown', onKey);
     }, [searchResults.length, isSearching]);
 
+    // 바깥 클릭으로 드롭다운 닫기
     useEffect(() => {
         const onDown = (e: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -332,35 +401,35 @@ const Profile: React.FC = () => {
         return () => document.removeEventListener('mousedown', onDown);
     }, []);
 
+    // 언마운트 시 검색 요청 취소
     useEffect(() => () => abortRef.current?.abort(), []);
 
-    // 초기 프로필 로드
-    useEffect(() => {
-        (async () => {
-            try {
-                const res = await api.get(`/api/users/${profile.id}/profile`);
-                setProfile(normalizeProfile(res.data));
-            } catch (e) {
-                console.log('프로필 로드 실패 (더미 데이터 사용):', e);
-                setProfile((prev) => normalizeProfile(prev));
-            }
-        })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [profile.id]);
-
-    // --- UI ---
+    // --- UI 바인딩 ---
     const favArtists = profile.favoriteArtists ?? [];
     const favGenres = profile.favoriteGenres ?? [];
     const attended = profile.attendedFestivals ?? [];
-    const mp = profile.musicPreferences ?? { preferredEra: '', moodPreferences: [], listeningFrequency: '', concertFrequency: '', discoveryMethod: '' };
-    const moodList = mp.moodPreferences ?? [];
+    const mp =
+        profile.musicPreferences ?? {
+            preferredEra: '',
+            moodPreferences: [],
+            listeningFrequency: '',
+            concertFrequency: '',
+            discoveryMethod: '',
+        };
 
-    // 항상 배열로 안전하게 사용
     const results = Array.isArray(searchResults) ? searchResults : [];
-
-    // 입력이 있고, (로딩 중이거나 결과가 있을 때만) 드롭다운 노출
     const shouldShowDropdown = !!artistSearchQuery.trim() && (isSearching || results.length > 0);
 
+    // 로딩 화면
+    if (isLoading) {
+        return (
+            <div className="min-h-[50vh] grid place-items-center">
+                <div className="loading-spinner" />
+            </div>
+        );
+    }
+
+    // --- UI ---
     return (
         <div className="bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6 pb-12 relative">
             <div className="max-w-4xl mx-auto">
@@ -378,7 +447,9 @@ const Profile: React.FC = () => {
                             <input
                                 type="text"
                                 value={profile.name ?? ''}
-                                onChange={(e) => setProfile((prev) => normalizeProfile({ ...prev, name: e.target.value }))}
+                                onChange={(e) =>
+                                    setProfile((prev) => normalizeProfile({ ...prev, name: e.target.value }, userId))
+                                }
                                 className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 placeholder="닉네임을 입력하세요"
                             />
@@ -388,7 +459,9 @@ const Profile: React.FC = () => {
                             <input
                                 type="email"
                                 value={profile.email ?? ''}
-                                onChange={(e) => setProfile((prev) => normalizeProfile({ ...prev, email: e.target.value }))}
+                                onChange={(e) =>
+                                    setProfile((prev) => normalizeProfile({ ...prev, email: e.target.value }, userId))
+                                }
                                 className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 placeholder="이메일을 입력하세요"
                             />
@@ -397,8 +470,13 @@ const Profile: React.FC = () => {
                 </div>
 
                 {/* 좋아하는 아티스트 */}
-                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20 relative z-[100]" style={{ isolation: 'isolate' }}>
-                    <h2 className="text-xl font-bold text-white mb-4">좋아하는 아티스트 ({favArtists.length})</h2>
+                <div
+                    className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20 relative z-[100]"
+                    style={{ isolation: 'isolate' }}
+                >
+                    <h2 className="text-xl font-bold text-white mb-4">
+                        좋아하는 아티스트 ({favArtists.length})
+                    </h2>
 
                     {/* 아티스트 검색 */}
                     <div className="relative mb-4">
@@ -414,7 +492,8 @@ const Profile: React.FC = () => {
                         </div>
 
                         {/* 검색 결과 드롭다운 */}
-                        {(shouldShowDropdown || (!isSearching && artistSearchQuery.trim() && results.length === 0)) && (
+                        {(shouldShowDropdown ||
+                            (!isSearching && artistSearchQuery.trim() && results.length === 0)) && (
                             <div
                                 ref={dropdownRef}
                                 className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-200 z-[200] max-h-96 overflow-hidden flex flex-col"
@@ -427,7 +506,10 @@ const Profile: React.FC = () => {
                                         </p>
                                     </div>
                                     <button
-                                        onClick={() => { setSearchResults([]); setArtistSearchQuery(''); }}
+                                        onClick={() => {
+                                            setSearchResults([]);
+                                            setArtistSearchQuery('');
+                                        }}
                                         className="text-gray-400 hover:text-gray-600 p-1 rounded-full"
                                     >
                                         <X className="h-4 w-4" />
@@ -435,48 +517,62 @@ const Profile: React.FC = () => {
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto">
-                                    {isSearching && <div className="p-4 text-center text-sm text-gray-500">검색 중…</div>}
+                                    {isSearching && (
+                                        <div className="p-4 text-center text-sm text-gray-500">검색 중…</div>
+                                    )}
 
                                     {!isSearching && results.length === 0 && artistSearchQuery.trim() && (
                                         <div className="p-4 text-center text-sm text-gray-500">결과가 없습니다</div>
                                     )}
 
-                                    {!isSearching && results.length > 0 && results.map((artist) => (
-                                        <div
-                                            key={artist.id}
-                                            onClick={() => addArtist(artist)}
-                                            className="flex items-center p-3 hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
-                                        >
-                                            <img
-                                                src={artist.image}
-                                                alt={artist.name}
-                                                className="w-10 h-10 rounded-full object-cover mr-3 shadow-md"
-                                                onError={(e) => {
-                                                    const t = e.currentTarget as HTMLImageElement;
-                                                    t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(artist.name)}&backgroundColor=random`;
-                                                }}
-                                            />
-                                            <div className="flex-1 min-w-0">
-                                                <div className="font-semibold text-gray-900 text-sm">{artist.name}</div>
-                                                <div className="text-xs text-gray-600">
-                                                    {typeof artist.followers === 'number' ? `팔로워 ${artist.followers.toLocaleString()}명` : null}
-                                                    {typeof artist.popularity === 'number'
-                                                        ? `${typeof artist.followers === 'number' ? ' • ' : ''}인기도 ${artist.popularity}/100`
-                                                        : null}
+                                    {!isSearching &&
+                                        results.length > 0 &&
+                                        results.map((artist) => (
+                                            <div
+                                                key={artist.id}
+                                                onClick={() => addArtist(artist)}
+                                                className="flex items-center p-3 hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                                            >
+                                                <img
+                                                    src={artist.image}
+                                                    alt={artist.name}
+                                                    className="w-10 h-10 rounded-full object-cover mr-3 shadow-md"
+                                                    onError={(e) => {
+                                                        const t = e.currentTarget as HTMLImageElement;
+                                                        t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+                                                            artist.name
+                                                        )}&backgroundColor=random`;
+                                                    }}
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-semibold text-gray-900 text-sm">{artist.name}</div>
+                                                    <div className="text-xs text-gray-600">
+                                                        {typeof artist.followers === 'number'
+                                                            ? `팔로워 ${artist.followers.toLocaleString()}명`
+                                                            : null}
+                                                        {typeof artist.popularity === 'number'
+                                                            ? `${typeof artist.followers === 'number' ? ' • ' : ''}인기도 ${
+                                                                artist.popularity
+                                                            }/100`
+                                                            : null}
+                                                    </div>
+                                                    {artist.genres?.length ? (
+                                                        <div className="text-xs text-gray-500 mt-1">
+                                                            {artist.genres.slice(0, 2).join(' • ')}
+                                                        </div>
+                                                    ) : null}
                                                 </div>
-                                                {artist.genres?.length ? (
-                                                    <div className="text-xs text-gray-500 mt-1">{artist.genres.slice(0, 2).join(' • ')}</div>
-                                                ) : null}
+                                                <div className="ml-3 p-2 bg-blue-100 text-blue-600 rounded-full hover:bg-blue-200 transition-colors">
+                                                    <Plus className="h-4 w-4" />
+                                                </div>
                                             </div>
-                                            <div className="ml-3 p-2 bg-blue-100 text-blue-600 rounded-full hover:bg-blue-200 transition-colors">
-                                                <Plus className="h-4 w-4" />
-                                            </div>
-                                        </div>
-                                    ))}
+                                        ))}
                                 </div>
 
                                 <div className="p-2 bg-gray-50">
-                                    <p className="text-xs text-gray-500 text-center">클릭하여 아티스트를 추가하거나 ESC로 닫기</p>
+                                    <p className="text-xs text-gray-500 text-center">
+                                        클릭하여 아티스트를 추가하거나 ESC로 닫기
+                                    </p>
                                 </div>
                             </div>
                         )}
@@ -494,7 +590,9 @@ const Profile: React.FC = () => {
                                         onError={(e) => {
                                             const t = e.currentTarget as HTMLImageElement;
                                             if (!t.src.includes('dicebear')) {
-                                                t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(artist.name)}&backgroundColor=random`;
+                                                t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+                                                    artist.name
+                                                )}&backgroundColor=random`;
                                             }
                                         }}
                                     />
@@ -502,17 +600,25 @@ const Profile: React.FC = () => {
 
                                     <div className="mt-2 flex flex-wrap justify-center gap-1">
                                         {typeof artist.followers === 'number' && (
-                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">팔로워 {artist.followers.toLocaleString()}명</span>
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">
+                        팔로워 {artist.followers.toLocaleString()}명
+                      </span>
                                         )}
                                         {typeof artist.popularity === 'number' && (
-                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">인기도 {artist.popularity}/100</span>
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/30 text-white">
+                        인기도 {artist.popularity}/100
+                      </span>
                                         )}
                                     </div>
 
                                     {artist.genres?.length ? (
                                         <div className="mt-2 flex flex-wrap justify-center gap-1">
                                             {artist.genres.slice(0, 3).map((g) => (
-                                                <span key={g} className="text-[10px] px-2 py-0.5 rounded-full bg-black/30 text-white" title={g}>
+                                                <span
+                                                    key={g}
+                                                    className="text-[10px] px-2 py-0.5 rounded-full bg-black/30 text-white"
+                                                    title={g}
+                                                >
                           {g}
                         </span>
                                             ))}
@@ -533,7 +639,9 @@ const Profile: React.FC = () => {
 
                 {/* 좋아하는 장르 */}
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
-                    <h2 className="text-xl font-bold text-white mb-4">좋아하는 장르 ({favGenres.length})</h2>
+                    <h2 className="text-xl font-bold text-white mb-4">
+                        좋아하는 장르 ({favGenres.length})
+                    </h2>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto">
                         {availableGenres.map((genre) => {
                             const isSelected = favGenres.find((g) => g.id === genre.id);
@@ -542,7 +650,9 @@ const Profile: React.FC = () => {
                                     key={genre.id}
                                     onClick={() => toggleGenre(genre)}
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        isSelected ? 'bg-blue-600 text-white border-2 border-blue-400' : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                                        isSelected
+                                            ? 'bg-blue-600 text-white border-2 border-blue-400'
+                                            : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
                                 >
                                     {genre.name}
@@ -554,7 +664,9 @@ const Profile: React.FC = () => {
 
                 {/* 참여한 음악 페스티벌 */}
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
-                    <h2 className="text-xl font-bold text-white mb-4">참여한 음악 페스티벌 ({attended.length})</h2>
+                    <h2 className="text-xl font-bold text-white mb-4">
+                        참여한 음악 페스티벌 ({attended.length})
+                    </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {musicFestivals.map((festival) => {
                             const isSelected = attended.includes(festival.id);
@@ -563,7 +675,9 @@ const Profile: React.FC = () => {
                                     key={festival.id}
                                     onClick={() => toggleFestival(festival.id)}
                                     className={`p-3 rounded-lg text-left transition-all ${
-                                        isSelected ? 'bg-purple-600 text-white border-2 border-purple-400' : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                                        isSelected
+                                            ? 'bg-purple-600 text-white border-2 border-purple-400'
+                                            : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
                                 >
                                     <div className="font-medium text-sm">{festival.name}</div>
@@ -587,13 +701,15 @@ const Profile: React.FC = () => {
                                 <button
                                     key={era.value}
                                     onClick={() =>
-                                        setProfile((prev) => normalizeProfile({
-                                            ...prev,
-                                            musicPreferences: { ...(prev.musicPreferences), preferredEra: era.value },
-                                        }))
+                                        setProfile((prev) =>
+                                            normalizeProfile(
+                                                { ...prev, musicPreferences: { ...(prev.musicPreferences), preferredEra: era.value } },
+                                                userId
+                                            )
+                                        )
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        (profile.musicPreferences.preferredEra) === era.value
+                                        profile.musicPreferences.preferredEra === era.value
                                             ? 'bg-green-600 text-white border-2 border-green-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -612,13 +728,18 @@ const Profile: React.FC = () => {
                                 <button
                                     key={freq.value}
                                     onClick={() =>
-                                        setProfile((prev) => normalizeProfile({
-                                            ...prev,
-                                            musicPreferences: { ...(prev.musicPreferences), listeningFrequency: freq.value },
-                                        }))
+                                        setProfile((prev) =>
+                                            normalizeProfile(
+                                                {
+                                                    ...prev,
+                                                    musicPreferences: { ...(prev.musicPreferences), listeningFrequency: freq.value },
+                                                },
+                                                userId
+                                            )
+                                        )
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        (profile.musicPreferences.listeningFrequency) === freq.value
+                                        profile.musicPreferences.listeningFrequency === freq.value
                                             ? 'bg-yellow-600 text-white border-2 border-yellow-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -637,13 +758,18 @@ const Profile: React.FC = () => {
                                 <button
                                     key={freq.value}
                                     onClick={() =>
-                                        setProfile((prev) => normalizeProfile({
-                                            ...prev,
-                                            musicPreferences: { ...(prev.musicPreferences), concertFrequency: freq.value },
-                                        }))
+                                        setProfile((prev) =>
+                                            normalizeProfile(
+                                                {
+                                                    ...prev,
+                                                    musicPreferences: { ...(prev.musicPreferences), concertFrequency: freq.value },
+                                                },
+                                                userId
+                                            )
+                                        )
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        (profile.musicPreferences.concertFrequency) === freq.value
+                                        profile.musicPreferences.concertFrequency === freq.value
                                             ? 'bg-red-600 text-white border-2 border-red-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -662,13 +788,15 @@ const Profile: React.FC = () => {
                                 <button
                                     key={method.value}
                                     onClick={() =>
-                                        setProfile((prev) => normalizeProfile({
-                                            ...prev,
-                                            musicPreferences: { ...(prev.musicPreferences), discoveryMethod: method.value },
-                                        }))
+                                        setProfile((prev) =>
+                                            normalizeProfile(
+                                                { ...prev, musicPreferences: { ...(prev.musicPreferences), discoveryMethod: method.value } },
+                                                userId
+                                            )
+                                        )
                                     }
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        (profile.musicPreferences.discoveryMethod) === method.value
+                                        profile.musicPreferences.discoveryMethod === method.value
                                             ? 'bg-indigo-600 text-white border-2 border-indigo-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -692,7 +820,9 @@ const Profile: React.FC = () => {
                                         key={mood.value}
                                         onClick={() => toggleMood(mood.value)}
                                         className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                            isSelected ? 'bg-pink-600 text-white border-2 border-pink-400' : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                                            isSelected
+                                                ? 'bg-pink-600 text-white border-2 border-pink-400'
+                                                : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                         }`}
                                     >
                                         {mood.label}
@@ -744,9 +874,13 @@ const Profile: React.FC = () => {
                             </div>
                             <div className="text-white text-sm">
                                 청취:{' '}
-                                {listeningFrequencyOptions.find((f) => f.value === profile.musicPreferences.listeningFrequency)?.label || '미설정'}{' '}
+                                {listeningFrequencyOptions.find(
+                                    (f) => f.value === profile.musicPreferences.listeningFrequency
+                                )?.label || '미설정'}{' '}
                                 | 공연:{' '}
-                                {concertFrequencyOptions.find((f) => f.value === profile.musicPreferences.concertFrequency)?.label || '미설정'}
+                                {concertFrequencyOptions.find(
+                                    (f) => f.value === profile.musicPreferences.concertFrequency
+                                )?.label || '미설정'}
                             </div>
                         </div>
                     </div>
@@ -755,7 +889,7 @@ const Profile: React.FC = () => {
                 {/* 저장 버튼 */}
                 <div className="text-center">
                     <button
-                        onClick={saveProfile}
+                        onClick={onSaveProfile}
                         disabled={isSaving}
                         className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 text-white font-bold py-3 px-8 rounded-full transition-all transform hover:scale-105 flex items-center mx-auto"
                     >

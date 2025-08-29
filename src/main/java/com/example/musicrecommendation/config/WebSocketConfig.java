@@ -1,3 +1,4 @@
+// src/main/java/com/example/musicrecommendation/config/WebSocketConfig.java
 package com.example.musicrecommendation.config;
 
 import org.springframework.context.annotation.Configuration;
@@ -6,32 +7,27 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
-/**
- * WebSocket 설정 클래스
- */
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
-    public void configureMessageBroker(MessageBrokerRegistry config) {
-        // 메시지 브로커 활성화 - 클라이언트가 구독할 수 있는 destination
-        config.enableSimpleBroker("/topic", "/queue");
-        // 클라이언트에서 서버로 메시지를 보낼 때 사용할 prefix
-        config.setApplicationDestinationPrefixes("/app");
-        // 사용자별 개인 메시지를 위한 prefix
-        config.setUserDestinationPrefix("/user");
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
+        // 프론트에서 SockJS('/ws')를 사용하므로 반드시 withSockJS() 필요
+        registry.addEndpoint("/ws")
+                .setAllowedOriginPatterns("*")
+                .withSockJS();
+        // 만약 네이티브 WebSocket도 같이 열고 싶다면(선택):
+        registry.addEndpoint("/ws").setAllowedOriginPatterns("*");
     }
 
     @Override
-    public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // WebSocket 연결 엔드포인트
-        registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*")
-                .withSockJS(); // SockJS fallback 옵션
-
-        // 추가 엔드포인트 (SockJS 없이)
-        registry.addEndpoint("/ws-native")
-                .setAllowedOriginPatterns("*");
+    public void configureMessageBroker(MessageBrokerRegistry registry) {
+        // 프론트가 destination:/app/...으로 보내므로 prefix는 /app
+        registry.setApplicationDestinationPrefixes("/app");
+        // 서버가 방송하는 채널(prefix)들
+        registry.enableSimpleBroker("/topic", "/queue");
+        // /user/queue/... 구독용
+        registry.setUserDestinationPrefix("/user");
     }
 }

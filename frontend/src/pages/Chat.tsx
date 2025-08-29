@@ -1,404 +1,439 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Heart, Music, Search, Clock, X, Check, Zap } from 'lucide-react';
-import axios from 'axios';
+// frontend/src/pages/Chat.tsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Send, Paperclip, Smile, User, Loader2, Music, ArrowLeft, CheckCheck } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import api from '../api/client';
 import { useSocket } from '../context/SocketContext';
 
-const Matching = () => {
-    const [matchingStatus, setMatchingStatus] = useState('IDLE'); // IDLE, WAITING, MATCHED
-    const [matchedUser, setMatchedUser] = useState<any>(null);
-    const [waitingTime, setWaitingTime] = useState(0);
-    const [queuePosition, setQueuePosition] = useState(0);
-    const [isMatching, setIsMatching] = useState(false);
-    const { isConnected, requestMatching } = useSocket();
+/* ===================== 타입 ===================== */
+type ChatRoom = {
+    id: string | number;
+    name?: string;
+    lastMessage?: string;
+    unread?: number;
+};
 
+type ChatMessage = {
+    id: string | number;
+    roomId: string | number;
+    senderId: number | string;
+    senderName?: string;
+    content: string;
+    createdAt: string; // ISO
+    type?: string;
+};
+
+type Me = { id: number; name?: string; email?: string | null };
+
+/* ===================== 유틸 ===================== */
+const useQuery = () => new URLSearchParams(useLocation().search);
+
+const fmtTime = (iso: string) => {
+    try {
+        const d = new Date(iso);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+        return '';
+    }
+};
+
+// "room_2_2" → "22"
+const normalizeRoomId = (roomIdLike: string | number): string => {
+    const s = String(roomIdLike);
+    const digits = s.replace(/\D+/g, '');
+    return digits || s; // 숫자 없으면 원문 반환(백엔드도 정규화하므로 안전)
+};
+
+/* ===================== 컴포넌트 ===================== */
+const Chat: React.FC = () => {
+    const navigate = useNavigate();
+    const query = useQuery();
+
+    // 소켓(있을 수도 없음)
+    const socket = useSocket() as any;
+    const isSocketReady = !!socket?.isConnected;
+
+    // 내 정보
+    const [me, setMe] = useState<Me | null>(null);
+
+    // 방/메시지 상태
+    const [rooms, setRooms] = useState<ChatRoom[]>([]);
+    const [activeRoomId, setActiveRoomId] = useState<string | number | null>(null);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [sending, setSending] = useState(false);
+    const [input, setInput] = useState('');
+    const [isTyping, setIsTyping] = useState(false);
+    const [peerTyping, setPeerTyping] = useState(false);
+
+    const inputRef = useRef<HTMLInputElement>(null);
+    const endRef = useRef<HTMLDivElement>(null);
+
+    /* -------- URL/세션에서 roomId 복원 -------- */
     useEffect(() => {
-        checkMatchingStatus();
+        const rid = query.get('roomId') ?? sessionStorage.getItem('lastRoomId');
+        if (rid) setActiveRoomId(rid);
+    }, [query]);
+
+    /* -------- 내 정보 -------- */
+    useEffect(() => {
+        (async () => {
+            try {
+                const { data } = await api.get('/api/auth/me');
+                if (data?.authenticated && data?.user?.id) {
+                    setMe({ id: data.user.id, name: data.user.name, email: data.user.email ?? null });
+                } else {
+                    setMe({ id: 1, name: '뮤직러버', email: null }); // 폴백
+                }
+            } catch {
+                setMe({ id: 1, name: '뮤직러버', email: null });
+            }
+        })();
     }, []);
 
-    useEffect(() => {
-        let interval: NodeJS.Timeout;
-        if (matchingStatus === 'WAITING') {
-            interval = setInterval(() => {
-                setWaitingTime(prev => prev + 1);
-            }, 1000);
+    /* -------- 방 목록 -------- */
+    const loadRooms = async () => {
+        try {
+            const { data } = await api.get('/api/chat/rooms');
+            const list: ChatRoom[] = Array.isArray(data)
+                ? data.map((r: any) => ({
+                    id: r.id ?? r.roomId,
+                    name: r.name ?? `방 ${r.id ?? r.roomId}`,
+                    lastMessage: r.lastMessage ?? '',
+                    unread: r.unread ?? 0,
+                }))
+                : [];
+            setRooms(list);
+        } catch {
+            // 폴백: 현재 roomId 하나만 노출
+            const rid = query.get('roomId') ?? sessionStorage.getItem('lastRoomId') ?? 'room_2_2';
+            const matched = JSON.parse(sessionStorage.getItem('matchedUser') || 'null');
+            setRooms([
+                {
+                    id: rid,
+                    name: matched?.name ? `${matched.name}와의 채팅` : `채팅방 ${rid}`,
+                    lastMessage: '',
+                    unread: 0,
+                },
+            ]);
         }
-        return () => clearInterval(interval);
-    }, [matchingStatus]);
+    };
 
-    // WebSocket 이벤트 리스너
-    useEffect(() => {
-        const handleMatchingSuccess = (event: CustomEvent) => {
-            setMatchingStatus('MATCHED');
-            setMatchedUser(event.detail.matchedUser || {
-                id: 2,
-                name: '음악친구',
-                chatRoomId: event.detail.roomId
+    /* -------- 메시지 로드 -------- */
+    const loadMessages = async (roomId: string | number) => {
+        const rid = normalizeRoomId(roomId);
+        try {
+            const { data } = await api.get(`/api/chat/rooms/${rid}/messages`, {
+                params: { limit: 100, order: 'asc' },
             });
+            const list: ChatMessage[] = Array.isArray(data)
+                ? data.map((m: any, idx: number) => ({
+                    id: m.id ?? idx,
+                    roomId: rid,
+                    senderId: m.senderId ?? m.sender?.id ?? 'unknown',
+                    senderName: m.senderName ?? m.sender?.name ?? (String(m.senderId) === '0' ? '시스템' : '상대'),
+                    content: String(m.content ?? ''),
+                    type: m.type ?? 'TEXT',
+                    createdAt: m.createdAt ?? new Date().toISOString(),
+                }))
+                : [];
+            setMessages(list);
+        } catch {
+            setMessages([]); // API 없으면 빈 대화에서 시작
+        }
+    };
+
+    /* -------- 초기 로드 -------- */
+    useEffect(() => {
+        (async () => {
+            await loadRooms();
+            setLoading(false);
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    /* -------- 방이 정해지면 메시지 로드 -------- */
+    useEffect(() => {
+        if (!activeRoomId) return;
+        setLoading(true);
+        (async () => {
+            await loadMessages(activeRoomId);
+            setLoading(false);
+            setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeRoomId]);
+
+    /* -------- 소켓 이벤트 구독 -------- */
+    useEffect(() => {
+        const onWinMsg = (ev: any) => {
+            const m = ev?.detail;
+            if (!m || String(normalizeRoomId(m.roomId)) !== String(normalizeRoomId(activeRoomId || ''))) return;
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: m.id ?? `${Date.now()}`,
+                    roomId: normalizeRoomId(m.roomId),
+                    senderId: m.senderId ?? 'unknown',
+                    senderName: m.senderName ?? (String(m.senderId) === '0' ? '시스템' : '상대'),
+                    content: String(m.content ?? ''),
+                    type: m.type ?? 'TEXT',
+                    createdAt: m.createdAt ?? new Date().toISOString(),
+                },
+            ]);
+            setPeerTyping(false);
+            setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 10);
         };
 
-        const handleMatchingFailed = () => {
-            setMatchingStatus('IDLE');
+        const onWinTyping = (ev: any) => {
+            const d = ev?.detail;
+            if (String(normalizeRoomId(d?.roomId)) !== String(normalizeRoomId(activeRoomId || ''))) return;
+            setPeerTyping(Boolean(d?.typing));
+            if (d?.typing) setTimeout(() => setPeerTyping(false), 2500);
         };
 
-        window.addEventListener('matchingSuccess', handleMatchingSuccess as EventListener);
-        window.addEventListener('matchingFailed', handleMatchingFailed as EventListener);
+        window.addEventListener('chatMessage', onWinMsg as EventListener);
+        window.addEventListener('chatTyping', onWinTyping as EventListener);
+
+        // SocketContext 쪽 리스너도 있으면 사용
+        let offSocketMsg: any;
+        if (socket?.onMessage) {
+            offSocketMsg = socket.onMessage(onWinMsg);
+        }
 
         return () => {
-            window.removeEventListener('matchingSuccess', handleMatchingSuccess as EventListener);
-            window.removeEventListener('matchingFailed', handleMatchingFailed as EventListener);
+            window.removeEventListener('chatMessage', onWinMsg as EventListener);
+            window.removeEventListener('chatTyping', onWinTyping as EventListener);
+            if (offSocketMsg) offSocketMsg();
         };
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeRoomId, socket?.onMessage]);
 
-    const checkMatchingStatus = async () => {
+    /* -------- 타이핑 표시(소켓) -------- */
+    useEffect(() => {
+        if (!activeRoomId || !isSocketReady || !socket?.sendTyping) return;
+        if (!isTyping) return;
+        const rid = normalizeRoomId(activeRoomId);
+        socket.sendTyping(rid, true);
+        const t = setTimeout(() => socket.sendTyping(rid, false), 1500);
+        return () => clearTimeout(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isTyping, activeRoomId, isSocketReady]);
+
+    const activeRoom = useMemo(
+        () => rooms.find((r) => String(r.id) === String(activeRoomId)) || null,
+        [rooms, activeRoomId]
+    );
+
+    /* -------- 전송 -------- */
+    const handleSend = async () => {
+        const text = input.trim();
+        if (!text || !activeRoomId || !me) return;
+
+        const rid = normalizeRoomId(activeRoomId);
+
+        // UI에 먼저 낙관적 반영
+        const localMsg: ChatMessage = {
+            id: `${Date.now()}`,
+            roomId: rid,
+            senderId: me.id,
+            senderName: me.name ?? '나',
+            content: text,
+            type: 'TEXT',
+            createdAt: new Date().toISOString(),
+        };
+
         try {
-            const response = await axios.get('http://localhost:9090/api/realtime-matching/status/1');
-            const status = response.data.status;
+            setSending(true);
+            setMessages((prev) => [...prev, localMsg]);
+            setInput('');
+            setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 10);
 
-            setMatchingStatus(status);
-            if (status === 'MATCHED') {
-                setMatchedUser({
-                    id: response.data.matchedWith,
-                    name: '음악친구',
-                    chatRoomId: response.data.roomId
-                });
-            } else if (status === 'WAITING') {
-                setQueuePosition(response.data.queuePosition || 0);
+            // 1) 소켓 우선
+            if (isSocketReady && socket?.sendChatMessage) {
+                await socket.sendChatMessage(rid, text);
+                return;
             }
-        } catch (error) {
-            console.error('매칭 상태 확인 오류:', error);
-        }
-    };
 
-    const startMatching = async () => {
-        try {
-            setIsMatching(true);
-
-            // WebSocket으로 실시간 매칭 요청
-            if (isConnected && requestMatching) {
-                requestMatching();
-                setMatchingStatus('WAITING');
-                setWaitingTime(0);
-                setQueuePosition(1);
-            } else {
-                // 폴백: HTTP API 사용
-                const response = await axios.post('http://localhost:9090/api/realtime-matching/request/1');
-
-                if (response.data.success) {
-                    setMatchingStatus('WAITING');
-                    setWaitingTime(0);
-                    setQueuePosition(response.data.queuePosition || 1);
-                    toast.success('매칭 요청이 시작되었습니다!');
-                } else {
-                    toast.error(response.data.message || '매칭 요청에 실패했습니다');
-                }
-            }
-        } catch (error) {
-            console.error('매칭 시작 오류:', error);
-            toast.error('매칭 요청 중 오류가 발생했습니다');
+            // 2) REST fallback (백엔드가 @RequestParam senderId, content 받음)
+            await api.post(`/api/chat/rooms/${rid}/messages`, null, {
+                params: { senderId: me.id, content: text },
+            });
+        } catch {
+            toast.error('메시지 전송 실패');
         } finally {
-            setIsMatching(false);
+            setSending(false);
         }
     };
 
-    const cancelMatching = async () => {
-        try {
-            await axios.delete('http://localhost:9090/api/realtime-matching/cancel/1');
-            setMatchingStatus('IDLE');
-            setWaitingTime(0);
-            setQueuePosition(0);
-            toast.success('매칭이 취소되었습니다');
-        } catch (error) {
-            console.error('매칭 취소 오류:', error);
-            toast.error('매칭 취소 중 오류가 발생했습니다');
-        }
+    /* -------- 파일 첨부(데모) -------- */
+    const onAttach = () => {
+        toast('파일 첨부는 곧 제공됩니다 📎');
     };
 
-    const endMatching = async () => {
-        try {
-            await axios.delete('http://localhost:9090/api/realtime-matching/end/1');
-            setMatchingStatus('IDLE');
-            setMatchedUser(null);
-            toast.success('매칭이 종료되었습니다');
-        } catch (error) {
-            console.error('매칭 종료 오류:', error);
-            toast.error('매칭 종료 중 오류가 발생했습니다');
-        }
+    /* -------- 좌측: 방 클릭 -------- */
+    const openRoom = (rid: string | number) => {
+        setActiveRoomId(rid);
+        sessionStorage.setItem('lastRoomId', String(rid));
+        navigate(`/chat?roomId=${rid}`, { replace: true });
     };
 
-    const createDemoMatch = async () => {
-        try {
-            const response = await axios.post('http://localhost:9090/api/realtime-matching/demo/quick-match?user1Id=1&user2Id=2');
-            if (response.data.success) {
-                setMatchingStatus('MATCHED');
-                setMatchedUser({
-                    id: 2,
-                    name: '데모 음악친구',
-                    chatRoomId: response.data.demoMatch.room
-                });
-                toast.success('🎉 데모 매칭 성공!');
-            }
-        } catch (error) {
-            console.error('데모 매칭 오류:', error);
-            toast.error('데모 매칭 생성 중 오류가 발생했습니다');
-        }
-    };
-
-    const formatTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
+    if (loading) {
+        return (
+            <div className="min-h-[60vh] grid place-items-center">
+                <Loader2 className="w-6 h-6 animate-spin text-white" />
+            </div>
+        );
+    }
 
     return (
-        <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
-            {/* 헤더 */}
-            <div className="text-center space-y-4">
-                <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
-                    🎵 음악 매칭
-                </h1>
-                <p className="text-lg text-gray-600 dark:text-gray-300">
-                    비슷한 음악 취향을 가진 사람들과 실시간으로 연결되세요
-                </p>
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* 좌측: 방 목록 */}
+            <aside className="md:col-span-1 glass-card p-4">
+                <div className="flex items-center gap-2 mb-3">
+                    <ArrowLeft className="w-4 h-4 text-gray-400" />
+                    <h2 className="font-semibold">채팅방</h2>
+                </div>
+                <div className="space-y-2 max-h-[70vh] overflow-auto pr-1">
+                    {rooms.map((r) => (
+                        <button
+                            key={r.id}
+                            onClick={() => openRoom(r.id)}
+                            className={`w-full text-left p-3 rounded-lg transition-all ${
+                                String(r.id) === String(activeRoomId)
+                                    ? 'bg-blue-600/80 text-white'
+                                    : 'hover:bg-white/10 text-white/90'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 grid place-items-center">
+                                    <User className="w-4 h-4 text-white" />
+                                </div>
+                                <div className="flex-1">
+                                    <div className="text-sm font-medium truncate">{r.name ?? `방 ${r.id}`}</div>
+                                    {r.lastMessage ? (
+                                        <div className="text-xs opacity-70 truncate">{r.lastMessage}</div>
+                                    ) : null}
+                                </div>
+                                {r.unread ? (
+                                    <span className="text-[10px] bg-red-500/90 text-white rounded-full px-2 py-0.5">
+                    {r.unread}
+                  </span>
+                                ) : null}
+                            </div>
+                        </button>
+                    ))}
+                    {!rooms.length && <div className="text-sm text-gray-400">참여 중인 채팅방이 없습니다.</div>}
+                </div>
+            </aside>
 
-            {/* 매칭 상태별 UI */}
-            {matchingStatus === 'IDLE' && (
-                <div className="space-y-6">
-                    {/* 매칭 시작 카드 */}
-                    <div className="glass-card p-8 text-center">
-                        <div className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <Search className="h-12 w-12 text-white" />
+            {/* 우측: 대화창 */}
+            <section className="md:col-span-2 glass-card p-0 overflow-hidden">
+                {/* 헤더 */}
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 grid place-items-center">
+                        <Music className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <div className="font-semibold truncate">
+                            {activeRoom?.name ?? (activeRoomId ? `채팅방 ${activeRoomId}` : '채팅')}
                         </div>
-                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-                            새로운 음악 친구 찾기
-                        </h2>
-                        <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-2xl mx-auto">
-                            AI가 분석한 당신의 음악 취향을 바탕으로 완벽한 음악 파트너를 찾아드립니다.
-                            비슷한 장르, 아티스트, 감성을 공유하는 사람들과 만나보세요.
-                        </p>
-
-                        <div className="space-y-4">
-                            <button
-                                className="btn-primary text-lg px-8 py-4"
-                                onClick={startMatching}
-                                disabled={isMatching}
-                            >
-                                {isMatching ? (
-                                    <>
-                                        <div className="loading-spinner w-5 h-5 mr-2"></div>
-                                        매칭 시작 중...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Heart className="h-5 w-5 mr-2" />
-                                        매칭 시작하기
-                                    </>
-                                )}
-                            </button>
-
-                            <button
-                                className="btn-secondary ml-4"
-                                onClick={createDemoMatch}
-                            >
-                                <Zap className="h-4 w-4 mr-2" />
-                                데모 매칭 (테스트)
-                            </button>
+                        <div className="text-xs text-green-400">
+                            {peerTyping ? '상대가 입력 중…' : isSocketReady ? '실시간 연결됨' : '오프라인 모드'}
                         </div>
                     </div>
-
-                    {/* 매칭 방식 설명 */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="glass-card p-6 text-center">
-                            <Music className="h-12 w-12 text-blue-500 mx-auto mb-4" />
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-2">음악 취향 분석</h3>
-                            <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                선호하는 장르, 아티스트, 분위기를 AI가 정밀 분석
-                            </p>
-                        </div>
-                        <div className="glass-card p-6 text-center">
-                            <Users className="h-12 w-12 text-purple-500 mx-auto mb-4" />
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-2">스마트 매칭</h3>
-                            <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                유사도 70% 이상의 높은 호환성을 가진 사용자 매칭
-                            </p>
-                        </div>
-                        <div className="glass-card p-6 text-center">
-                            <Heart className="h-12 w-12 text-pink-500 mx-auto mb-4" />
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-2">실시간 연결</h3>
-                            <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                매칭 즉시 1:1 채팅방 생성 및 음악 공유 가능
-                            </p>
-                        </div>
+                    <div className="text-xs text-white/70 flex items-center gap-1">
+                        읽음 동기화
+                        <CheckCheck className="w-4 h-4" />
                     </div>
                 </div>
-            )}
 
-            {matchingStatus === 'WAITING' && (
-                <div className="space-y-6">
-                    {/* 매칭 대기 중 */}
-                    <div className="glass-card p-8 text-center">
-                        <div className="w-32 h-32 mx-auto mb-6 relative">
-                            <div className="w-full h-full border-8 border-blue-200 dark:border-blue-800 rounded-full animate-pulse"></div>
-                            <div className="absolute inset-4 border-8 border-purple-500 rounded-full animate-spin border-t-transparent"></div>
-                            <Search className="absolute inset-0 m-auto h-12 w-12 text-blue-500 animate-bounce" />
+                {/* 메시지 리스트 */}
+                <div className="h-[60vh] overflow-y-auto px-4 py-4 space-y-2">
+                    {!activeRoomId && (
+                        <div className="text-center text-sm text-gray-400 mt-10">
+                            왼쪽에서 채팅방을 선택하거나 매칭 후 <b>채팅 시작하기</b> 버튼을 눌러주세요.
                         </div>
+                    )}
 
-                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-                            🔍 완벽한 음악 파트너를 찾는 중...
-                        </h2>
-
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-center space-x-6 text-lg">
-                                <div className="flex items-center text-blue-500">
-                                    <Clock className="h-5 w-5 mr-2" />
-                                    {formatTime(waitingTime)}
+                    {activeRoomId &&
+                        messages.map((m) => {
+                            const mine = me ? String(m.senderId) === String(me.id) : false;
+                            return (
+                                <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                                    <div
+                                        className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
+                                            mine ? 'bg-blue-600 text-white' : 'bg-white/10 text-white'
+                                        }`}
+                                    >
+                                        {!mine && (
+                                            <div className="text-[10px] opacity-70 mb-0.5">
+                                                {m.senderName ?? (String(m.senderId) === '0' ? '시스템' : '상대')}
+                                            </div>
+                                        )}
+                                        <div className="whitespace-pre-wrap break-words">
+                                            {m.content === '[decrypt_error]' ? '🔒 복호화 오류 메시지' : m.content}
+                                        </div>
+                                        <div className="text-[10px] opacity-60 mt-1 text-right">{fmtTime(m.createdAt)}</div>
+                                    </div>
                                 </div>
-                                <div className="flex items-center text-purple-500">
-                                    <Users className="h-5 w-5 mr-2" />
-                                    대기열 {queuePosition}번째
-                                </div>
-                            </div>
+                            );
+                        })}
+                    <div ref={endRef} />
+                </div>
 
-                            <p className="text-gray-600 dark:text-gray-400">
-                                비슷한 음악 취향을 가진 사용자를 찾고 있습니다...
-                            </p>
-
-                            <button
-                                className="btn-secondary"
-                                onClick={cancelMatching}
-                            >
-                                <X className="h-4 w-4 mr-2" />
-                                매칭 취소
-                            </button>
-                        </div>
+                {/* 입력창 */}
+                <div className="px-4 py-3 border-t border-white/10">
+                    <div className="flex items-center gap-2">
+                        <button onClick={onAttach} className="p-2 rounded-lg hover:bg-white/10">
+                            <Paperclip className="w-5 h-5 text-white/80" />
+                        </button>
+                        <button onClick={() => toast('이모지는 곧 제공됩니다 😄')} className="p-2 rounded-lg hover:bg-white/10">
+                            <Smile className="w-5 h-5 text-white/80" />
+                        </button>
+                        <input
+                            ref={inputRef}
+                            value={input}
+                            onChange={(e) => {
+                                setInput(e.target.value);
+                                setIsTyping(true);
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSend();
+                                }
+                            }}
+                            placeholder={activeRoomId ? '메시지를 입력하세요…' : '채팅방을 먼저 선택하세요'}
+                            className="flex-1 bg-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none placeholder:text-white/50"
+                            disabled={!activeRoomId || sending}
+                        />
+                        <button
+                            onClick={handleSend}
+                            disabled={!activeRoomId || sending || !input.trim()}
+                            className="btn-primary px-4 py-2 disabled:opacity-50"
+                        >
+                            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        </button>
                     </div>
 
-                    {/* 매칭 진행 상황 */}
-                    <div className="glass-card p-6">
-                        <h3 className="font-bold text-gray-800 dark:text-white mb-4">매칭 진행 상황</h3>
-                        <div className="space-y-3">
-                            <div className="flex items-center text-green-500">
-                                <Check className="h-5 w-5 mr-3" />
-                                음악 취향 분석 완료
-                            </div>
-                            <div className="flex items-center text-blue-500">
-                                <div className="loading-spinner w-4 h-4 mr-3"></div>
-                                호환 가능한 사용자 검색 중
-                            </div>
-                            <div className="flex items-center text-gray-400">
-                                <Clock className="h-5 w-5 mr-3" />
-                                매칭 완료 대기 중
-                            </div>
-                        </div>
+                    {/* 퀵 리플라이 */}
+                    <div className="flex flex-wrap gap-2 mt-3">
+                        {['플리 공유할래요?', '요즘 뭐 들어요?', '공연 보러 가요!', '최애는 누구?'].map((t) => (
+                            <button
+                                key={t}
+                                onClick={() => setInput((prev) => (prev ? prev + ' ' + t : t))}
+                                className="px-2 py-1 text-xs rounded-full bg-white/10 text-white hover:bg-white/20"
+                            >
+                                {t}
+                            </button>
+                        ))}
                     </div>
                 </div>
-            )}
-
-            {matchingStatus === 'MATCHED' && matchedUser && (
-                <div className="space-y-6">
-                    {/* 매칭 성공 */}
-                    <div className="glass-card p-8 text-center">
-                        <div className="w-24 h-24 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-                            <Heart className="h-12 w-12 text-white" />
-                        </div>
-
-                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-                            🎉 매칭 성공!
-                        </h2>
-
-                        <div className="bg-white/5 dark:bg-gray-800/30 rounded-2xl p-6 mb-6">
-                            <div className="flex items-center justify-center space-x-4">
-                                <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                                    <Music className="h-8 w-8 text-white" />
-                                </div>
-                                <div className="text-center">
-                                    <h3 className="font-bold text-gray-800 dark:text-white text-lg">
-                                        {matchedUser.name}
-                                    </h3>
-                                    <p className="text-green-500 font-medium">85% 음악 취향 일치</p>
-                                    <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                        공통 관심사: K-POP, 인디, R&B
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-4">
-                            <button
-                                className="btn-primary text-lg px-8 py-4"
-                                onClick={() => window.location.href = '/chat'}
-                            >
-                                <Heart className="h-5 w-5 mr-2" />
-                                채팅 시작하기
-                            </button>
-
-                            <button
-                                className="btn-secondary ml-4"
-                                onClick={endMatching}
-                            >
-                                <X className="h-4 w-4 mr-2" />
-                                매칭 종료
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* 매칭 정보 */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="glass-card p-6">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-4">공통 관심사</h3>
-                            <div className="space-y-2">
-                                <div className="flex items-center">
-                                    <Music className="h-4 w-4 text-blue-500 mr-2" />
-                                    <span className="text-gray-600 dark:text-gray-400">K-POP</span>
-                                </div>
-                                <div className="flex items-center">
-                                    <Music className="h-4 w-4 text-purple-500 mr-2" />
-                                    <span className="text-gray-600 dark:text-gray-400">인디 음악</span>
-                                </div>
-                                <div className="flex items-center">
-                                    <Music className="h-4 w-4 text-pink-500 mr-2" />
-                                    <span className="text-gray-600 dark:text-gray-400">R&B/Soul</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="glass-card p-6">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-4">추천 활동</h3>
-                            <div className="space-y-2 text-gray-600 dark:text-gray-400">
-                                <p>🎵 서로의 플레이리스트 공유하기</p>
-                                <p>🎤 좋아하는 아티스트 이야기하기</p>
-                                <p>🎶 새로운 음악 추천해주기</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* 시스템 상태 */}
-            <div className="glass-card p-6">
-                <h3 className="font-bold text-gray-800 dark:text-white mb-4">매칭 시스템 현황</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                    <div>
-                        <p className="text-2xl font-bold text-blue-500">25</p>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm">대기 중</p>
-                    </div>
-                    <div>
-                        <p className="text-2xl font-bold text-green-500">12</p>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm">매칭 완료</p>
-                    </div>
-                    <div>
-                        <p className="text-2xl font-bold text-purple-500">87</p>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm">온라인</p>
-                    </div>
-                    <div>
-                        <p className="text-2xl font-bold text-pink-500">95%</p>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm">만족도</p>
-                    </div>
-                </div>
-            </div>
+            </section>
         </div>
     );
 };
 
-export default Matching;
+export default Chat;

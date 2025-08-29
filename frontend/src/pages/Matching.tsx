@@ -1,40 +1,64 @@
+// frontend/src/pages/Matching.tsx
 import React, { useState, useEffect } from 'react';
 import { Users, Heart, Music, Search, Clock, X, Check, Zap } from 'lucide-react';
-import axios from 'axios';
 import { toast } from 'react-hot-toast';
 import { useSocket } from '../context/SocketContext';
+import { useNavigate } from 'react-router-dom';
+import api from '../api/client';
 
-const Matching = () => {
-    const [matchingStatus, setMatchingStatus] = useState('IDLE'); // IDLE, WAITING, MATCHED
+type MatchStatus = 'IDLE' | 'WAITING' | 'MATCHED';
+
+const Matching: React.FC = () => {
+    const [matchingStatus, setMatchingStatus] = useState<MatchStatus>('IDLE');
     const [matchedUser, setMatchedUser] = useState<any>(null);
     const [waitingTime, setWaitingTime] = useState(0);
     const [queuePosition, setQueuePosition] = useState(0);
     const [isMatching, setIsMatching] = useState(false);
+
     const { isConnected, requestMatching } = useSocket();
+    const navigate = useNavigate();
+
+    // 로그인 사용자 ID (있으면 /api/auth/me 사용, 없으면 1)
+    const [userId, setUserId] = useState<number>(1);
 
     useEffect(() => {
-        checkMatchingStatus();
+        (async () => {
+            try {
+                const { data } = await api.get('/api/auth/me');
+                if (data?.authenticated && data?.user?.id) {
+                    setUserId(Number(data.user.id));
+                }
+            } catch {
+                // fallback: keep 1
+            }
+            checkMatchingStatus();
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
-        let interval: NodeJS.Timeout;
+        let interval: ReturnType<typeof setInterval> | undefined;
         if (matchingStatus === 'WAITING') {
-            interval = setInterval(() => {
-                setWaitingTime(prev => prev + 1);
-            }, 1000);
+            interval = setInterval(() => setWaitingTime((prev) => prev + 1), 1000);
         }
-        return () => clearInterval(interval);
+        return () => {
+            if (interval) clearInterval(interval);
+        };
     }, [matchingStatus]);
 
-    // WebSocket 이벤트 리스너
+    // WebSocket 커스텀 이벤트 리스너
     useEffect(() => {
-        const handleMatchingSuccess = (event: CustomEvent) => {
+        const handleMatchingSuccess = (event: any) => {
+            const roomId = event?.detail?.roomId;
+            const mUser = event?.detail?.matchedUser || { id: 2, name: '음악친구', chatRoomId: roomId };
             setMatchingStatus('MATCHED');
-            setMatchedUser(event.detail.matchedUser || {
-                id: 2,
-                name: '음악친구',
-                chatRoomId: event.detail.roomId
-            });
+            setMatchedUser(mUser);
+
+            // ✅ 채팅 이동 대비: 세션에 저장
+            if (roomId) {
+                sessionStorage.setItem('lastRoomId', String(roomId));
+            }
+            sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
         };
 
         const handleMatchingFailed = () => {
@@ -52,18 +76,26 @@ const Matching = () => {
 
     const checkMatchingStatus = async () => {
         try {
-            const response = await axios.get('http://localhost:9090/api/realtime-matching/status/1');
-            const status = response.data.status;
+            const { data } = await api.get(`/api/realtime-matching/status/${userId}`);
+            const status: MatchStatus = data?.status || 'IDLE';
 
             setMatchingStatus(status);
             if (status === 'MATCHED') {
-                setMatchedUser({
-                    id: response.data.matchedWith,
+                const roomId = data?.roomId;
+                const mUser = {
+                    id: data?.matchedWith ?? 2,
                     name: '음악친구',
-                    chatRoomId: response.data.roomId
-                });
+                    chatRoomId: roomId,
+                };
+                setMatchedUser(mUser);
+
+                // ✅ 세션 저장
+                if (roomId) {
+                    sessionStorage.setItem('lastRoomId', String(roomId));
+                }
+                sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
             } else if (status === 'WAITING') {
-                setQueuePosition(response.data.queuePosition || 0);
+                setQueuePosition(data?.queuePosition || 0);
             }
         } catch (error) {
             console.error('매칭 상태 확인 오류:', error);
@@ -74,23 +106,23 @@ const Matching = () => {
         try {
             setIsMatching(true);
 
-            // WebSocket으로 실시간 매칭 요청
+            // WebSocket 실시간 매칭
             if (isConnected && requestMatching) {
                 requestMatching();
                 setMatchingStatus('WAITING');
                 setWaitingTime(0);
                 setQueuePosition(1);
+                toast.success('실시간 매칭 요청 전송!');
             } else {
-                // 폴백: HTTP API 사용
-                const response = await axios.post('http://localhost:9090/api/realtime-matching/request/1');
-
-                if (response.data.success) {
+                // 폴백: HTTP
+                const { data } = await api.post(`/api/realtime-matching/request/${userId}`);
+                if (data?.success) {
                     setMatchingStatus('WAITING');
                     setWaitingTime(0);
-                    setQueuePosition(response.data.queuePosition || 1);
+                    setQueuePosition(data?.queuePosition || 1);
                     toast.success('매칭 요청이 시작되었습니다!');
                 } else {
-                    toast.error(response.data.message || '매칭 요청에 실패했습니다');
+                    toast.error(data?.message || '매칭 요청에 실패했습니다');
                 }
             }
         } catch (error) {
@@ -103,7 +135,7 @@ const Matching = () => {
 
     const cancelMatching = async () => {
         try {
-            await axios.delete('http://localhost:9090/api/realtime-matching/cancel/1');
+            await api.delete(`/api/realtime-matching/cancel/${userId}`);
             setMatchingStatus('IDLE');
             setWaitingTime(0);
             setQueuePosition(0);
@@ -116,7 +148,7 @@ const Matching = () => {
 
     const endMatching = async () => {
         try {
-            await axios.delete('http://localhost:9090/api/realtime-matching/end/1');
+            await api.delete(`/api/realtime-matching/end/${userId}`);
             setMatchingStatus('IDLE');
             setMatchedUser(null);
             toast.success('매칭이 종료되었습니다');
@@ -128,19 +160,44 @@ const Matching = () => {
 
     const createDemoMatch = async () => {
         try {
-            const response = await axios.post('http://localhost:9090/api/realtime-matching/demo/quick-match?user1Id=1&user2Id=2');
-            if (response.data.success) {
+            const { data } = await api.post(
+                '/api/realtime-matching/demo/quick-match',
+                null,
+                { params: { user1Id: userId, user2Id: 2 } }
+            );
+            if (data?.success) {
+                const roomId = data?.demoMatch?.room;
+                const mUser = { id: 2, name: '데모 음악친구', chatRoomId: roomId };
                 setMatchingStatus('MATCHED');
-                setMatchedUser({
-                    id: 2,
-                    name: '데모 음악친구',
-                    chatRoomId: response.data.demoMatch.room
-                });
+                setMatchedUser(mUser);
+
+                // ✅ 세션 저장
+                if (roomId) {
+                    sessionStorage.setItem('lastRoomId', String(roomId));
+                }
+                sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
+
                 toast.success('🎉 데모 매칭 성공!');
+            } else {
+                toast.error(data?.message || '데모 매칭 실패');
             }
         } catch (error) {
             console.error('데모 매칭 오류:', error);
             toast.error('데모 매칭 생성 중 오류가 발생했습니다');
+        }
+    };
+
+    const goChat = () => {
+        const roomId = matchedUser?.chatRoomId || sessionStorage.getItem('lastRoomId');
+        if (roomId) {
+            // 안전을 위해 다시 저장
+            sessionStorage.setItem('lastRoomId', String(roomId));
+            if (matchedUser?.id && matchedUser?.name) {
+                sessionStorage.setItem('matchedUser', JSON.stringify({ id: matchedUser.id, name: matchedUser.name }));
+            }
+            navigate(`/chat?roomId=${roomId}`);
+        } else {
+            navigate('/chat'); // 방 정보 없으면 채팅으로만 이동
         }
     };
 
@@ -170,20 +227,14 @@ const Matching = () => {
                         <div className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
                             <Search className="h-12 w-12 text-white" />
                         </div>
-                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-                            새로운 음악 친구 찾기
-                        </h2>
+                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">새로운 음악 친구 찾기</h2>
                         <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-2xl mx-auto">
                             AI가 분석한 당신의 음악 취향을 바탕으로 완벽한 음악 파트너를 찾아드립니다.
                             비슷한 장르, 아티스트, 감성을 공유하는 사람들과 만나보세요.
                         </p>
 
                         <div className="space-y-4">
-                            <button
-                                className="btn-primary text-lg px-8 py-4"
-                                onClick={startMatching}
-                                disabled={isMatching}
-                            >
+                            <button className="btn-primary text-lg px-8 py-4" onClick={startMatching} disabled={isMatching}>
                                 {isMatching ? (
                                     <>
                                         <div className="loading-spinner w-5 h-5 mr-2"></div>
@@ -197,10 +248,7 @@ const Matching = () => {
                                 )}
                             </button>
 
-                            <button
-                                className="btn-secondary ml-4"
-                                onClick={createDemoMatch}
-                            >
+                            <button className="btn-secondary ml-4" onClick={createDemoMatch}>
                                 <Zap className="h-4 w-4 mr-2" />
                                 데모 매칭 (테스트)
                             </button>
@@ -212,23 +260,17 @@ const Matching = () => {
                         <div className="glass-card p-6 text-center">
                             <Music className="h-12 w-12 text-blue-500 mx-auto mb-4" />
                             <h3 className="font-bold text-gray-800 dark:text-white mb-2">음악 취향 분석</h3>
-                            <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                선호하는 장르, 아티스트, 분위기를 AI가 정밀 분석
-                            </p>
+                            <p className="text-gray-600 dark:text-gray-400 text-sm">선호하는 장르, 아티스트, 분위기를 AI가 정밀 분석</p>
                         </div>
                         <div className="glass-card p-6 text-center">
                             <Users className="h-12 w-12 text-purple-500 mx-auto mb-4" />
                             <h3 className="font-bold text-gray-800 dark:text-white mb-2">스마트 매칭</h3>
-                            <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                유사도 70% 이상의 높은 호환성을 가진 사용자 매칭
-                            </p>
+                            <p className="text-gray-600 dark:text-gray-400 text-sm">유사도 70% 이상의 높은 호환성을 가진 사용자 매칭</p>
                         </div>
                         <div className="glass-card p-6 text-center">
                             <Heart className="h-12 w-12 text-pink-500 mx-auto mb-4" />
                             <h3 className="font-bold text-gray-800 dark:text-white mb-2">실시간 연결</h3>
-                            <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                매칭 즉시 1:1 채팅방 생성 및 음악 공유 가능
-                            </p>
+                            <p className="text-gray-600 dark:text-gray-400 text-sm">매칭 즉시 1:1 채팅방 생성 및 음악 공유 가능</p>
                         </div>
                     </div>
                 </div>
@@ -244,9 +286,7 @@ const Matching = () => {
                             <Search className="absolute inset-0 m-auto h-12 w-12 text-blue-500 animate-bounce" />
                         </div>
 
-                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-                            🔍 완벽한 음악 파트너를 찾는 중...
-                        </h2>
+                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">🔍 완벽한 음악 파트너를 찾는 중...</h2>
 
                         <div className="space-y-4">
                             <div className="flex items-center justify-center space-x-6 text-lg">
@@ -260,14 +300,9 @@ const Matching = () => {
                                 </div>
                             </div>
 
-                            <p className="text-gray-600 dark:text-gray-400">
-                                비슷한 음악 취향을 가진 사용자를 찾고 있습니다...
-                            </p>
+                            <p className="text-gray-600 dark:text-gray-400">비슷한 음악 취향을 가진 사용자를 찾고 있습니다...</p>
 
-                            <button
-                                className="btn-secondary"
-                                onClick={cancelMatching}
-                            >
+                            <button className="btn-secondary" onClick={cancelMatching}>
                                 <X className="h-4 w-4 mr-2" />
                                 매칭 취소
                             </button>
@@ -303,9 +338,7 @@ const Matching = () => {
                             <Heart className="h-12 w-12 text-white" />
                         </div>
 
-                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-                            🎉 매칭 성공!
-                        </h2>
+                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">🎉 매칭 성공!</h2>
 
                         <div className="bg-white/5 dark:bg-gray-800/30 rounded-2xl p-6 mb-6">
                             <div className="flex items-center justify-center space-x-4">
@@ -313,30 +346,20 @@ const Matching = () => {
                                     <Music className="h-8 w-8 text-white" />
                                 </div>
                                 <div className="text-center">
-                                    <h3 className="font-bold text-gray-800 dark:text-white text-lg">
-                                        {matchedUser.name}
-                                    </h3>
+                                    <h3 className="font-bold text-gray-800 dark:text-white text-lg">{matchedUser.name}</h3>
                                     <p className="text-green-500 font-medium">85% 음악 취향 일치</p>
-                                    <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                        공통 관심사: K-POP, 인디, R&B
-                                    </p>
+                                    <p className="text-gray-600 dark:text-gray-400 text-sm">공통 관심사: K-POP, 인디, R&B</p>
                                 </div>
                             </div>
                         </div>
 
                         <div className="space-y-4">
-                            <button
-                                className="btn-primary text-lg px-8 py-4"
-                                onClick={() => window.location.href = '/chat'}
-                            >
+                            <button className="btn-primary text-lg px-8 py-4" onClick={goChat}>
                                 <Heart className="h-5 w-5 mr-2" />
                                 채팅 시작하기
                             </button>
 
-                            <button
-                                className="btn-secondary ml-4"
-                                onClick={endMatching}
-                            >
+                            <button className="btn-secondary ml-4" onClick={endMatching}>
                                 <X className="h-4 w-4 mr-2" />
                                 매칭 종료
                             </button>
@@ -375,7 +398,7 @@ const Matching = () => {
                 </div>
             )}
 
-            {/* 시스템 상태 */}
+            {/* 시스템 상태 (데모) */}
             <div className="glass-card p-6">
                 <h3 className="font-bold text-gray-800 dark:text-white mb-4">매칭 시스템 현황</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">

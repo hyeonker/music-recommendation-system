@@ -11,6 +11,8 @@ import Chat from './pages/Chat';
 import Stats from './pages/Stats';
 import Profile from './pages/Profile';
 import LoadingSpinner from './components/LoadingSpinner';
+import RequireAuth from './components/RequireAuth';   // ⭐ 추가: 로그인 가드
+import SocialAuth from './components/SocialAuth';     // ⭐ 선택: /login 전용 페이지에서 사용
 
 // Context
 import { SocketProvider } from './context/SocketContext';
@@ -25,19 +27,13 @@ const queryClient = new QueryClient({
         queries: {
             refetchOnWindowFocus: false,
             retry: (failureCount, error: any) => {
-                if (error?.code === 'NETWORK_ERROR' && failureCount < 3) {
-                    return true;
-                }
-                if (error?.status >= 500 && failureCount < 1) {
-                    return true;
-                }
+                if (error?.code === 'NETWORK_ERROR' && failureCount < 3) return true;
+                if (error?.status >= 500 && failureCount < 1) return true;
                 return false;
             },
             retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
         },
-        mutations: {
-            retry: 1,
-        },
+        mutations: { retry: 1 },
     },
 });
 
@@ -46,70 +42,53 @@ function App() {
     const [darkMode, setDarkMode] = useState(true);
     const [isLoading, setIsLoading] = useState(true);
 
-    // 다크모드 토글
-    const toggleDarkMode = () => {
-        setDarkMode(!darkMode);
-        if (!darkMode) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-    };
+    // ⭐ 다크모드 토글 (클래스 적용은 별도 useEffect에서 수행)
+    const toggleDarkMode = () => setDarkMode((prev) => !prev);
 
-    // 컴포넌트 마운트 시 초기화
+    // 초기 로딩 시뮬레이션
     useEffect(() => {
-        // 다크모드 기본 설정
-        document.documentElement.classList.add('dark');
-
-        // 로딩 시뮬레이션
-        const loadingTimer = setTimeout(() => {
-            setIsLoading(false);
-        }, 1500);
-
-        return () => {
-            clearTimeout(loadingTimer);
-        };
+        const loadingTimer = setTimeout(() => setIsLoading(false), 800);
+        return () => clearTimeout(loadingTimer);
     }, []);
+
+    // ⭐ darkMode 상태에 따라 html class 토글 (이 방식이 버그 적음)
+    useEffect(() => {
+        const el = document.documentElement;
+        if (darkMode) el.classList.add('dark');
+        else el.classList.remove('dark');
+    }, [darkMode]);
 
     // 전역 에러 처리
     useEffect(() => {
         const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
             console.error('Unhandled promise rejection:', event.reason);
-            if (event.reason?.message?.includes('Network Error')) {
-                return;
-            }
+            if (event.reason?.message?.includes('Network Error')) return;
         };
-
         const handleError = (event: ErrorEvent) => {
             console.error('Global error:', event.error);
         };
-
         window.addEventListener('unhandledrejection', handleUnhandledRejection);
         window.addEventListener('error', handleError);
-
         return () => {
             window.removeEventListener('unhandledrejection', handleUnhandledRejection);
             window.removeEventListener('error', handleError);
         };
     }, []);
 
-    if (isLoading) {
-        return <LoadingSpinner />;
-    }
+    if (isLoading) return <LoadingSpinner />;
 
     return (
         <QueryClientProvider client={queryClient}>
             <UserContext.Provider value={{ user, setUser }}>
                 <SocketProvider>
-                    <div className={`min-h-screen transition-colors duration-300 ${
-                        darkMode ? 'dark bg-gradient-dark' : 'bg-gradient-to-br from-blue-50 to-purple-50'
-                    }`}>
+                    <div
+                        className={`min-h-screen transition-colors duration-300 ${
+                            darkMode ? 'dark bg-gradient-dark' : 'bg-gradient-to-br from-blue-50 to-purple-50'
+                        }`}
+                    >
                         <Router>
                             <div className="flex flex-col min-h-screen">
-                                <Navbar
-                                    darkMode={darkMode}
-                                    toggleDarkMode={toggleDarkMode}
-                                />
+                                <Navbar darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
 
                                 <main className="flex-1 container mx-auto px-4 py-6 max-w-7xl">
                                     <Routes>
@@ -118,7 +97,22 @@ function App() {
                                         <Route path="/matching" element={<Matching />} />
                                         <Route path="/chat" element={<Chat />} />
                                         <Route path="/stats" element={<Stats />} />
-                                        <Route path="/profile" element={<Profile />} />
+
+                                        {/* ⭐ 로그인 필요: /profile */}
+                                        <Route
+                                            path="/profile"
+                                            element={
+                                                <RequireAuth>
+                                                    <Profile />
+                                                </RequireAuth>
+                                            }
+                                        />
+
+                                        {/* ⭐ 선택: 직접 /login 접근 시 소셜 로그인 카드만 보여주고 싶다면 */}
+                                        <Route path="/login" element={<SocialAuth />} />
+
+                                        {/* 404 처리 (선택) */}
+                                        {/* <Route path="*" element={<Navigate to="/dashboard" replace />} /> */}
                                     </Routes>
                                 </main>
 
@@ -126,9 +120,7 @@ function App() {
                                 <footer className="bg-white/10 dark:bg-gray-900/50 backdrop-blur-lg border-t border-gray-200/20 dark:border-gray-700/30">
                                     <div className="container mx-auto px-4 py-4">
                                         <div className="flex justify-between items-center">
-                                            <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                                음악으로 연결되는 사람들
-                                            </p>
+                                            <p className="text-gray-600 dark:text-gray-400 text-sm">음악으로 연결되는 사람들</p>
                                         </div>
                                     </div>
                                 </footer>
@@ -146,18 +138,8 @@ function App() {
                                         border: `1px solid ${darkMode ? '#374151' : '#e5e7eb'}`,
                                         boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
                                     },
-                                    success: {
-                                        iconTheme: {
-                                            primary: '#10b981',
-                                            secondary: '#ffffff',
-                                        },
-                                    },
-                                    error: {
-                                        iconTheme: {
-                                            primary: '#ef4444',
-                                            secondary: '#ffffff',
-                                        },
-                                    },
+                                    success: { iconTheme: { primary: '#10b981', secondary: '#ffffff' } },
+                                    error: { iconTheme: { primary: '#ef4444', secondary: '#ffffff' } },
                                 }}
                             />
                         </Router>
