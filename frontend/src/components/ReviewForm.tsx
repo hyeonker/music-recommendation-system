@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Star, Send, X } from 'lucide-react';
-import { validateInput, validateReviewText } from '../utils/security';
+import { validateInput, validateReviewText, validateMusicSearch } from '../utils/security';
 
 interface ReviewFormProps {
   mode?: 'create' | 'edit';
@@ -289,13 +289,14 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
                 value={artistSearch}
                 onChange={(e) => {
                   const rawValue = e.target.value;
-                  const validation = validateInput(rawValue, '아티스트 검색');
-                  if (!validation.isValid) {
-                    alert(validation.error || '올바르지 않은 검색어입니다');
+                  
+                  // 음악 검색은 매우 관대하게 처리 - 기본적인 스크립트만 차단
+                  if (rawValue.includes('<script') || rawValue.includes('javascript:')) {
+                    alert('검색어에 허용되지 않는 코드가 포함되어 있습니다.');
                     return;
                   }
                   
-                  const value = validation.sanitized;
+                  const value = rawValue;  // trim() 제거하여 원본 그대로 사용
                   setArtistSearch(value);
                   
                   // 아티스트 검색어가 변경되면 선택된 아티스트와 곡 초기화
@@ -427,13 +428,14 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
                   value={songSearch}
                   onChange={(e) => {
                     const rawValue = e.target.value;
-                    const validation = validateInput(rawValue, '곡 검색');
-                    if (!validation.isValid) {
-                      alert(validation.error || '올바르지 않은 검색어입니다');
+                    
+                    // 곡 검색도 매우 관대하게 처리 - 기본적인 스크립트만 차단
+                    if (rawValue.includes('<script') || rawValue.includes('javascript:')) {
+                      alert('검색어에 허용되지 않는 코드가 포함되어 있습니다.');
                       return;
                     }
                     
-                    const value = validation.sanitized;
+                    const value = rawValue;  // trim() 제거하여 원본 그대로 사용
                     setSongSearch(value);
                     
                     if (value !== selectedMusic?.name) {

@@ -10,6 +10,8 @@ interface Recommendation {
     image: string;
     genre: string;
     score: number;
+    isLiked?: boolean; // 좋아요 상태 추가
+    spotifyId?: string; // Spotify 트랙 ID 추가
 }
 
 interface DashboardStats {
@@ -59,10 +61,82 @@ const Dashboard: React.FC = () => {
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [systemStatus, setSystemStatus] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [likedTracks, setLikedTracks] = useState<Set<string | number>>(new Set()); // 좋아요한 트랙들
 
     const imageFallback = (e: React.SyntheticEvent<HTMLImageElement>, text: string) => {
         const img = e.currentTarget;
         img.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(text)}&backgroundColor=random`;
+    };
+
+    // YouTube에서 음악 검색
+    const playOnYouTube = (track: Recommendation) => {
+        const searchQuery = `${track.artist} ${track.title}`;
+        const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
+        window.open(youtubeSearchUrl, '_blank');
+    };
+
+    // Spotify 앱에서 열기
+    const openInSpotify = (track: Recommendation) => {
+        if (track.spotifyId) {
+            const spotifyAppUrl = `spotify:track:${track.spotifyId}`;
+            window.location.href = spotifyAppUrl;
+        } else {
+            // spotifyId가 없으면 일반 트랙 ID 사용
+            const spotifyAppUrl = `spotify:track:${track.id}`;
+            window.location.href = spotifyAppUrl;
+        }
+    };
+
+    // 좋아요 토글 함수
+    const toggleTrackLike = async (trackId: string | number, trackInfo?: Recommendation) => {
+        try {
+            const isCurrentlyLiked = likedTracks.has(trackId);
+            
+            if (isCurrentlyLiked) {
+                // 좋아요 해제
+                await api.delete(`/api/likes/song/${trackId}`);
+                setLikedTracks(prev => {
+                    const newSet = new Set(prev);
+                    newSet.delete(trackId);
+                    return newSet;
+                });
+            } else {
+                // 좋아요 추가
+                const likeData = {
+                    songId: trackId,
+                    title: trackInfo?.title || `Track ${trackId}`,
+                    artist: trackInfo?.artist || 'Unknown Artist',
+                    imageUrl: trackInfo?.image || '',
+                    externalId: String(trackId)
+                };
+                
+                await api.post('/api/likes/song', likeData);
+                setLikedTracks(prev => {
+                    const newSet = new Set(prev);
+                    newSet.add(trackId);
+                    return newSet;
+                });
+                
+                // 좋아요 추가 후 해당 곡을 추천 목록에서 제거
+                setRecommendations(prev => prev.filter(track => track.id !== trackId));
+            }
+        } catch (error) {
+            console.error('좋아요 처리 실패:', error);
+            alert('좋아요 처리 중 오류가 발생했습니다.');
+        }
+    };
+
+    // 사용자의 좋아요 목록 불러오기
+    const loadUserLikes = async (userId: number) => {
+        try {
+            const response = await api.get(`/api/likes/user/${userId}`);
+            const likes = response.data || [];
+            const likedIds = likes.map((like: any) => like.songId || like.song?.id).filter(Boolean);
+            setLikedTracks(new Set(likedIds));
+        } catch (error) {
+            console.warn('좋아요 목록 불러오기 실패:', error);
+            // 에러가 나도 페이지는 정상 작동하도록
+        }
     };
 
     const loadDashboardData = useCallback(async () => {
@@ -98,13 +172,39 @@ const Dashboard: React.FC = () => {
                 matchStatus = null;
             }
 
-            // 4) 추천 목록
+            // 4) 사용자 좋아요 목록 먼저 불러오기 (추천 필터링을 위해)
+            let currentLikedTracks = new Set<string | number>();
+            try {
+                const response = await api.get(`/api/likes/user/${userId}`);
+                const likes = response.data?.content || response.data || [];
+                const likedIds = likes.map((like: any) => like.externalId || like.songId || like.song?.id).filter(Boolean);
+                currentLikedTracks = new Set<string | number>(likedIds);
+                setLikedTracks(currentLikedTracks);
+            } catch (error) {
+                console.warn('좋아요 목록 불러오기 실패:', error);
+            }
+
+            // 5) 추천 목록 (좋아요한 곡 제외)
             try {
                 const rec = await api.get(`/api/recommendations/user/${userId}`);
-                const list = Array.isArray(rec.data) ? rec.data.slice(0, 4) : FALLBACK_RECS;
-                setRecommendations(list);
+                const allRecs = Array.isArray(rec.data) ? rec.data : FALLBACK_RECS;
+                
+                // 좋아요한 곡들 제외하고 필터링
+                const filteredRecs = allRecs.filter(track => !currentLikedTracks.has(track.id));
+                
+                // 필터링 후 부족하면 FALLBACK_RECS에서 보충
+                let finalRecs = filteredRecs.slice(0, 4);
+                if (finalRecs.length < 4) {
+                    const fallbackFiltered = FALLBACK_RECS.filter(track => !currentLikedTracks.has(track.id));
+                    const needed = 4 - finalRecs.length;
+                    finalRecs = [...finalRecs, ...fallbackFiltered.slice(0, needed)];
+                }
+                
+                setRecommendations(finalRecs);
             } catch {
-                setRecommendations(FALLBACK_RECS);
+                // 에러 시에도 좋아요한 곡 제외
+                const fallbackFiltered = FALLBACK_RECS.filter(track => !currentLikedTracks.has(track.id));
+                setRecommendations(fallbackFiltered.slice(0, 4));
             }
 
             // 5) 통계 계산 (setState 비동기 고려 없이 로컬 sys 사용)
@@ -249,7 +349,13 @@ const Dashboard: React.FC = () => {
                                         onError={(e) => imageFallback(e, `${track.artist} ${track.title}`)}
                                     />
                                     <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                                        <Play className="w-12 h-12 text-white" />
+                                        <button
+                                            onClick={() => playOnYouTube(track)}
+                                            className="bg-red-600/80 hover:bg-red-600 rounded-full p-3 transition-colors"
+                                            title="YouTube에서 검색"
+                                        >
+                                            <Play className="w-8 h-8 text-white" />
+                                        </button>
                                     </div>
                                     <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded-full text-xs font-bold">
                                         {track.score}%
@@ -260,7 +366,31 @@ const Dashboard: React.FC = () => {
                                 <p className="text-blue-200 text-sm mb-2 truncate">{track.artist}</p>
                                 <div className="flex items-center justify-between">
                                     <span className="bg-purple-600 text-white px-2 py-1 rounded-full text-xs">{track.genre}</span>
-                                    <Heart className="w-5 h-5 text-red-400 hover:text-red-300 cursor-pointer" />
+                                    <div className="flex space-x-2">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                openInSpotify(track);
+                                            }}
+                                            className="text-green-400 hover:text-green-300 transition-colors"
+                                            title="Spotify 앱에서 듣기"
+                                        >
+                                            <Music className="w-5 h-5" />
+                                        </button>
+                                        <div title={likedTracks.has(track.id) ? "좋아요 취소" : "좋아요"}>
+                                            <Heart 
+                                                className={`w-5 h-5 cursor-pointer transition-colors ${
+                                                    likedTracks.has(track.id) 
+                                                        ? 'text-red-500 fill-current' 
+                                                        : 'text-red-400 hover:text-red-300'
+                                                }`}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleTrackLike(track.id, track);
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         ))}

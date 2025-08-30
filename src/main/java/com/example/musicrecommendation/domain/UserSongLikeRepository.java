@@ -36,6 +36,21 @@ public interface UserSongLikeRepository extends JpaRepository<UserSongLike, Long
     Page<UserSongLike> findByUserIdOrderByLikedAtDesc(Long userId, Pageable pageable);
 
     /**
+     * 특정 사용자가 좋아요한 모든 곡 조회 (페이징) - EAGER FETCH
+     * lazy loading 문제 해결을 위해 JOIN FETCH 사용
+     *
+     * @param userId 사용자 ID
+     * @param pageable 페이징 정보
+     * @return 좋아요한 곡 목록 (페이징)
+     */
+    @Query("SELECT usl FROM UserSongLike usl " +
+           "JOIN FETCH usl.user " +
+           "JOIN FETCH usl.song " +
+           "WHERE usl.user.id = :userId " +
+           "ORDER BY usl.likedAt DESC")
+    Page<UserSongLike> findByUserIdWithSongAndUserOrderByLikedAtDesc(@Param("userId") Long userId, Pageable pageable);
+
+    /**
      * 특정 곡을 좋아요한 모든 사용자 조회
      *
      * @param songId 곡 ID

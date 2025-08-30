@@ -162,3 +162,32 @@ export const validateReviewText = (text: string): {
   
   return { isValid: true, sanitized };
 };
+
+/**
+ * 음악 검색 전용 검증 (더 관대한 규칙)
+ */
+export const validateMusicSearch = (search: string): {
+  isValid: boolean;
+  sanitized: string;
+  error?: string;
+} => {
+  if (!search) {
+    return { isValid: true, sanitized: '' };
+  }
+  
+  // 매우 위험한 스크립트 태그만 차단
+  const dangerousPattern = /<script[\s\S]*?>[\s\S]*?<\/script>|javascript:|vbscript:|on\w+\s*=/gi;
+  
+  if (dangerousPattern.test(search)) {
+    return {
+      isValid: false,
+      sanitized: '',
+      error: '검색어에 허용되지 않는 스크립트 코드가 포함되어 있습니다.'
+    };
+  }
+  
+  // 음악 검색에서는 원본 그대로 사용 (띄어쓰기와 특수문자 모두 허용)
+  const sanitized = search.trim();
+  
+  return { isValid: true, sanitized };
+};

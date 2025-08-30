@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
-    Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star, Shield
+    Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star, Shield, Search
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 
@@ -52,6 +52,7 @@ const Navbar = ({ darkMode, toggleDarkMode }) => {
         { path: '/dashboard', icon: Home,    label: '홈' },
         { path: '/matching',  icon: Users,   label: '매칭' },
         { path: '/chat',      icon: MessageCircle, label: '채팅' },
+        { path: '/music',     icon: Search,        label: '음악탐색' },
         { path: '/reviews',   icon: Star,          label: '리뷰' },
         { path: '/stats',     icon: BarChart3,     label: '통계' },
         { path: '/profile',   icon: Settings,      label: '프로필' },

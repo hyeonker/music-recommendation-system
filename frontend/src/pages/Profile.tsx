@@ -108,6 +108,8 @@ const Profile: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [nameError, setNameError] = useState<string>('');
     const [isCheckingName, setIsCheckingName] = useState(false);
+    const [likedSongs, setLikedSongs] = useState<any[]>([]);
+    const [isLoadingLikedSongs, setIsLoadingLikedSongs] = useState(false);
     const [isAdmin, setIsAdmin] = useState(false);
 
     // 드롭다운/요청 취소 refs
@@ -427,6 +429,59 @@ const Profile: React.FC = () => {
         }
     };
 
+    // 사용자의 좋아요한 음악 로드
+    const loadLikedSongs = async () => {
+        setIsLoadingLikedSongs(true);
+        try {
+            const response = await api.get(`/api/likes/user/${userId}`);
+            const likes = response.data?.content || response.data || [];
+            setLikedSongs(likes);
+        } catch (error) {
+            console.error('좋아요한 음악 로드 실패:', error);
+            setLikedSongs([]);
+        } finally {
+            setIsLoadingLikedSongs(false);
+        }
+    };
+
+    // 좋아요 취소 함수
+    const handleUnlikeSong = async (like: any) => {
+        try {
+            const songId = like.song?.id;
+            if (!songId) {
+                throw new Error('곡 ID를 찾을 수 없습니다.');
+            }
+
+            // API 호출로 좋아요 취소
+            await api.post('/api/likes/toggle', null, {
+                params: { userId, songId }
+            });
+
+            // 성공 시 목록에서 제거
+            setLikedSongs(prev => prev.filter(item => item.id !== like.id));
+            
+            // 성공 메시지
+            toast.success(`"${like.song?.title || like.title}"의 좋아요를 취소했습니다.`);
+        } catch (error) {
+            console.error('좋아요 취소 실패:', error);
+            toast.error('좋아요 취소 중 오류가 발생했습니다.');
+        }
+    };
+
+    // 앨범 표지 URL 생성 함수
+    const getAlbumCoverUrl = (like: any) => {
+        // 먼저 실제 앨범 표지 URL이 있는지 확인
+        const realImageUrl = like.song?.imageUrl || like.imageUrl;
+        if (realImageUrl && realImageUrl.startsWith('http')) {
+            return realImageUrl;
+        }
+        
+        // 실제 앨범 표지가 없으면 기본 이미지 사용
+        const title = like.song?.title || like.title || 'Music';
+        const artist = like.song?.artist || like.artist || 'Artist';
+        return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(title + ' ' + artist)}&backgroundColor=6366f1,8b5cf6,ec4899,f59e0b,10b981,f97316&backgroundType=gradientLinear`;
+    };
+
     const onSaveProfile = async () => {
         // 저장 전 이름 중복 체크
         if (nameError) {
@@ -538,6 +593,11 @@ const Profile: React.FC = () => {
                 setIsLoading(false);
             }
         })();
+        
+        // 좋아요한 음악도 함께 로드
+        if (userId) {
+            loadLikedSongs();
+        }
     }, [userId]);
 
     // 검색 디바운스
@@ -1036,6 +1096,83 @@ const Profile: React.FC = () => {
                             })}
                         </div>
                     </div>
+                </div>
+
+                {/* 내가 좋아요한 음악 */}
+                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
+                    <h2 className="text-xl font-bold text-white mb-4 flex items-center">
+                        <Heart className="h-6 w-6 text-red-400 mr-2" />
+                        내가 좋아요한 음악 ({likedSongs.length})
+                    </h2>
+
+                    {isLoadingLikedSongs ? (
+                        <div className="text-center py-8">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-4"></div>
+                            <p className="text-blue-200">좋아요한 음악을 불러오는 중...</p>
+                        </div>
+                    ) : likedSongs.length === 0 ? (
+                        <div className="text-center py-8">
+                            <Heart className="h-16 w-16 text-gray-400 mx-auto mb-4 opacity-50" />
+                            <p className="text-gray-400 text-lg mb-2">아직 좋아요한 음악이 없어요</p>
+                            <p className="text-gray-500 text-sm">대시보드나 음악탐색에서 좋아하는 음악에 ❤️를 눌러보세요!</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {likedSongs.slice(0, 9).map((like, index) => (
+                                <div
+                                    key={like.id || index}
+                                    className="bg-white/10 rounded-lg p-4 hover:bg-white/20 transition-colors group"
+                                >
+                                    <div className="flex items-center space-x-3 mb-3">
+                                        <div className="relative">
+                                            <img
+                                                src={getAlbumCoverUrl(like)}
+                                                alt={like.song?.title || like.title}
+                                                className="w-16 h-16 rounded-lg object-cover shadow-lg"
+                                                onError={(e) => {
+                                                    const img = e.currentTarget;
+                                                    img.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent((like.song?.title || like.title || 'Music') + ' ' + (like.song?.artist || like.artist || 'Artist'))}&backgroundColor=6366f1`;
+                                                }}
+                                            />
+                                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 rounded-lg transition-all duration-200"></div>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <h4 className="text-white font-medium text-sm truncate mb-1">
+                                                {like.song?.title || like.title || '제목 없음'}
+                                            </h4>
+                                            <p className="text-blue-200 text-xs truncate mb-1">
+                                                {like.song?.artist || like.artist || '아티스트 없음'}
+                                            </p>
+                                            {like.likedAt && (
+                                                <p className="text-gray-400 text-xs">
+                                                    {new Date(like.likedAt).toLocaleDateString('ko-KR')}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-gray-400 text-xs">좋아요한 음악</span>
+                                        <button
+                                            onClick={() => handleUnlikeSong(like)}
+                                            className="group/btn flex items-center space-x-1 text-red-400 hover:text-red-300 transition-colors duration-200 p-1 rounded-md hover:bg-red-500/10"
+                                            title="좋아요 취소"
+                                        >
+                                            <Heart className="h-4 w-4 fill-current group-hover/btn:scale-110 transition-transform duration-200" />
+                                            <span className="text-xs opacity-0 group-hover/btn:opacity-100 transition-opacity duration-200">취소</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {likedSongs.length > 9 && (
+                        <div className="text-center mt-4">
+                            <p className="text-blue-200 text-sm">
+                                +{likedSongs.length - 9}개의 음악을 더 좋아요했어요
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {/* 프로필 요약 */}

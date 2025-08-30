@@ -19,6 +19,9 @@ public class Song {
     @Column(nullable = false, length = 200)
     private String artist;
 
+    @Column(length = 500)
+    private String imageUrl;
+
     // 🔹 낙관적 락
     @Version
     @Column(nullable = false)
@@ -29,10 +32,22 @@ public class Song {
         this.artist = artist;
     }
 
+    public Song(String title, String artist, String imageUrl) {
+        this.title = title;
+        this.artist = artist;
+        this.imageUrl = imageUrl;
+    }
+
     /** 수정용 도메인 메서드 */
     public void change(String title, String artist) {
         this.title = title;
         this.artist = artist;
+    }
+
+    public void changeWithImage(String title, String artist, String imageUrl) {
+        this.title = title;
+        this.artist = artist;
+        this.imageUrl = imageUrl;
     }
     // === Getters ===
     public Long getId() {
@@ -45,6 +60,10 @@ public class Song {
 
     public String getArtist() {
         return artist;
+    }
+
+    public String getImageUrl() {
+        return imageUrl;
     }
 
     public Long getVersion() {

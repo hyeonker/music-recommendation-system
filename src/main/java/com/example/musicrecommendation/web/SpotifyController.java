@@ -6,7 +6,9 @@ import com.example.musicrecommendation.web.dto.spotify.ArtistDto;
 import com.example.musicrecommendation.web.dto.spotify.TrackDto;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/spotify")
@@ -98,6 +100,99 @@ public class SpotifyController {
         return spotifyService.getArtistTopTracks(artistId, market, safeLimit);
     }
 
+
+    /**
+     * 통합 검색 (MusicDiscovery 페이지용)
+     * 예) GET /api/spotify/search?q=Radiohead&type=track&limit=20
+     */
+    @GetMapping("/search")
+    public Map<String, Object> unifiedSearch(
+            @RequestParam(name = "q", required = false) String q,
+            @RequestParam(name = "type", defaultValue = "track") String type,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        String query = (q == null) ? "" : q.trim();
+        
+        if (query.isEmpty()) {
+            Map<String, Object> emptyResult = new HashMap<>();
+            if ("track".equals(type)) {
+                emptyResult.put("tracks", Map.of("items", List.of()));
+            } else if ("artist".equals(type)) {
+                emptyResult.put("artists", Map.of("items", List.of()));
+            }
+            return emptyResult;
+        }
+
+        int safeLimit = Math.max(1, Math.min(limit, 50));
+        
+        Map<String, Object> result = new HashMap<>();
+        
+        if ("track".equals(type)) {
+            List<TrackDto> tracks = spotifyService.searchTracks(query, safeLimit);
+            List<Map<String, Object>> spotifyFormatTracks = tracks.stream()
+                .map(this::convertToSpotifyFormat)
+                .toList();
+            result.put("tracks", Map.of("items", spotifyFormatTracks));
+        } else if ("artist".equals(type)) {
+            List<ArtistDto> artists = spotifyService.searchArtists(query, safeLimit);
+            result.put("artists", Map.of("items", artists));
+        } else {
+            List<TrackDto> tracks = spotifyService.searchTracks(query, safeLimit);
+            List<Map<String, Object>> spotifyFormatTracks = tracks.stream()
+                .map(this::convertToSpotifyFormat)
+                .toList();
+            result.put("tracks", Map.of("items", spotifyFormatTracks));
+        }
+        
+        return result;
+    }
+
+    private Map<String, Object> convertToSpotifyFormat(TrackDto track) {
+        Map<String, Object> spotifyTrack = new HashMap<>();
+        spotifyTrack.put("id", track.getId());
+        spotifyTrack.put("name", track.getName());
+        spotifyTrack.put("popularity", track.getPopularity());
+        spotifyTrack.put("duration_ms", track.getDurationMs());
+        spotifyTrack.put("preview_url", track.getPreviewUrl());
+        
+        // artists 배열
+        List<Map<String, Object>> artists = track.getArtists().stream()
+            .map(artist -> {
+                Map<String, Object> artistMap = new HashMap<>();
+                artistMap.put("name", artist.getName());
+                artistMap.put("id", artist.getId());
+                return artistMap;
+            })
+            .toList();
+        spotifyTrack.put("artists", artists);
+        
+        // album 객체
+        if (track.getAlbum() != null) {
+            Map<String, Object> album = new HashMap<>();
+            album.put("name", track.getAlbum().getName());
+            album.put("id", track.getAlbum().getId());
+            
+            // images 배열
+            if (track.getAlbum().getImages() != null && !track.getAlbum().getImages().isEmpty()) {
+                album.put("images", track.getAlbum().getImages());
+            } else {
+                album.put("images", List.of());
+            }
+            
+            spotifyTrack.put("album", album);
+        }
+        
+        // external_urls 객체
+        Map<String, String> externalUrls = new HashMap<>();
+        String spotifyUrl = track.getSpotifyUrl();
+        if (spotifyUrl == null || spotifyUrl.isEmpty()) {
+            spotifyUrl = "https://open.spotify.com/track/" + track.getId();
+        }
+        externalUrls.put("spotify", spotifyUrl);
+        spotifyTrack.put("external_urls", externalUrls);
+        
+        return spotifyTrack;
+    }
 
     /**
      * 간단 헬스체크 (토큰 갱신 가능 여부 확인용)

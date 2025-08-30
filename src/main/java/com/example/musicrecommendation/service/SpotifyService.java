@@ -294,6 +294,70 @@ public class SpotifyService {
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Bearer " + accessToken);
 
+            // 먼저 원본 검색어로 시도
+            List<TrackDto> allResults = new ArrayList<>();
+            
+            // 1. 원본 검색어
+            List<TrackDto> originalResults = searchWithQuery(query, headers, limit);
+            allResults.addAll(originalResults);
+            
+            // 2. 구두점 변형 검색 (쉼표를 공백으로, 공백을 쉼표로)
+            if (query.contains(",")) {
+                String spaceQuery = query.replaceAll(",\\s*", " ");
+                List<TrackDto> spaceResults = searchWithQuery(spaceQuery, headers, limit);
+                addUniqueResults(allResults, spaceResults, limit * 2);
+            } else if (query.contains(" ")) {
+                // 공백을 쉼표로 변환해서 검색
+                String commaQuery = query.replaceAll("\\s+", ",");
+                List<TrackDto> commaResults = searchWithQuery(commaQuery, headers, limit);
+                addUniqueResults(allResults, commaResults, limit * 2);
+                
+                // 공백을 쉼표+공백으로 변환해서도 검색
+                String commaSpaceQuery = query.replaceAll("\\s+", ", ");
+                List<TrackDto> commaSpaceResults = searchWithQuery(commaSpaceQuery, headers, limit);
+                addUniqueResults(allResults, commaSpaceResults, limit * 2);
+            }
+            
+            // 3. 구두점 제거 버전
+            String noPunctQuery = query.replaceAll("[\\p{Punct}]", " ").replaceAll("\\s+", " ").trim();
+            if (!noPunctQuery.equals(query)) {
+                List<TrackDto> noPunctResults = searchWithQuery(noPunctQuery, headers, limit);
+                addUniqueResults(allResults, noPunctResults, limit * 2);
+            }
+            
+            log.warn("🔍 검색어: '{}' - 통합 검색 결과: {}건", query, allResults.size());
+            
+            // 검색어와 관련성이 높은 결과만 필터링하고 순위 매기기
+            List<TrackDto> filteredResults = filterAndRankResults(allResults, query);
+            log.warn("✅ 필터링 후 검색 결과: {}건", filteredResults.size());
+            
+            // 필터링 후 상위 3개 곡 이름 로깅
+            log.warn("🎯 최종 결과:");
+            for (int i = 0; i < Math.min(3, filteredResults.size()); i++) {
+                TrackDto track = filteredResults.get(i);
+                String artistName = track.getArtists() != null && !track.getArtists().isEmpty() ? 
+                    track.getArtists().get(0).getName() : "Unknown";
+                log.warn("  #{}: '{}' by {} (인기도: {})", i+1, track.getName(), artistName, track.getPopularity());
+            }
+            
+            return filteredResults.stream().limit(limit).collect(Collectors.toList());
+
+        } catch (HttpStatusCodeException e) {
+            int code = e.getStatusCode().value();
+            if (e.getStatusCode().is5xxServerError() || code == 429) {
+                log.warn("Spotify 일시적 오류 감지(상태 {}), 재시도 대상: {}", code, e.getMessage());
+                throw new TransientSpotifyException("Transient HTTP " + code, e);
+            }
+            log.error("Spotify 클라이언트 오류(상태 {}): {}", code, e.getResponseBodyAsString());
+            return new ArrayList<>();
+        } catch (Exception e) {
+            log.error("Spotify 트랙 검색 실패: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+    
+    private List<TrackDto> searchWithQuery(String query, HttpHeaders headers, int limit) {
+        try {
             String url = UriComponentsBuilder.fromHttpUrl(spotifyConfig.getApi().getBaseUrl() + "/search")
                     .queryParam("q", query)
                     .queryParam("type", "track")
@@ -310,42 +374,13 @@ public class SpotifyService {
             );
 
             if (response.getBody() != null && response.getBody().getTracks() != null) {
-                List<TrackDto> out = convertToTrackDtos(response.getBody().getTracks().getItems());
-                log.debug("Spotify 트랙 검색 결과: {}건", out.size());
-                
-                // 처음 3개 곡 이름 로깅
-                for (int i = 0; i < Math.min(3, out.size()); i++) {
-                    TrackDto track = out.get(i);
-                    String artistName = track.getArtists() != null && !track.getArtists().isEmpty() ? 
-                        track.getArtists().get(0).getName() : "Unknown";
-                    log.warn("📀 검색결과 #{}: '{}' by {} (ID: {})", i+1, track.getName(), artistName, track.getId());
-                }
-                
-                // 특별히 5h4y42RUKwYKYWgutNwvKP ID를 찾아보기
-                boolean foundTarget = out.stream().anyMatch(track -> "5h4y42RUKwYKYWgutNwvKP".equals(track.getId()));
-                log.warn("🎯 Target song (5h4y42RUKwYKYWgutNwvKP) found in results: {}", foundTarget);
-                
-                return out;
+                return convertToTrackDtos(response.getBody().getTracks().getItems());
             }
 
             return new ArrayList<>();
-
-        } catch (HttpStatusCodeException e) {
-            int code = e.getStatusCode().value();
-            if (e.getStatusCode().is5xxServerError() || code == 429) {
-                log.warn("Spotify 일시적 오류 감지(상태 {}), 재시도 대상: {}", code, e.getMessage());
-                throw new TransientSpotifyException("Transient HTTP " + code, e);
-            }
-            log.error("Spotify 클라이언트 오류(상태 {}): {}", code, e.getResponseBodyAsString());
-            return new ArrayList<>(); // 개별 검색 실패 시 빈 결과 반환
-
-        } catch (ResourceAccessException e) {
-            log.warn("Spotify 네트워크 오류: {}", e.getMessage());
-            return new ArrayList<>(); // 개별 검색 실패 시 빈 결과 반환
-
         } catch (Exception e) {
-            log.error("트랙 검색 실패: {}", e.getMessage());
-            return new ArrayList<>(); // 개별 검색 실패 시 빈 결과 반환
+            log.error("개별 검색 실패: {}", e.getMessage());
+            return new ArrayList<>();
         }
     }
 
@@ -553,6 +588,144 @@ public class SpotifyService {
             return "Spotify API 연결 정상";
         } catch (Exception e) {
             return "Spotify API 연결 실패: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 검색 결과를 필터링하고 관련성에 따라 순위를 매김
+     */
+    private List<TrackDto> filterAndRankResults(List<TrackDto> results, String query) {
+        String normalizedQuery = normalizeTitle(query).toLowerCase();
+        String[] queryWords = normalizedQuery.split("\\s+");
+        
+        return results.stream()
+            .map(track -> new TrackWithScore(track, calculateRelevanceScore(track, normalizedQuery, queryWords)))
+            .filter(trackWithScore -> trackWithScore.score > 0) // 점수가 0인 결과 제외
+            .sorted((a, b) -> {
+                // 1차: 점수 높은 순
+                int scoreCompare = Double.compare(b.score, a.score);
+                if (scoreCompare != 0) return scoreCompare;
+                
+                // 2차: 인기도 높은 순
+                Integer aPopularity = a.track.getPopularity() != null ? a.track.getPopularity() : 0;
+                Integer bPopularity = b.track.getPopularity() != null ? b.track.getPopularity() : 0;
+                return Integer.compare(bPopularity, aPopularity);
+            })
+            .map(trackWithScore -> trackWithScore.track)
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * 트랙과 검색어의 관련성 점수 계산 (엄격한 매칭)
+     */
+    private double calculateRelevanceScore(TrackDto track, String normalizedQuery, String[] queryWords) {
+        double score = 0.0;
+        
+        String trackTitle = normalizeTitle(track.getName()).toLowerCase();
+        String originalTrackTitle = track.getName().toLowerCase();
+        String originalQuery = normalizedQuery;
+        
+        // 원본 제목도 체크 (구두점 포함)
+        String originalTitleLower = track.getName().toLowerCase();
+        String queryLower = originalQuery.toLowerCase();
+        
+        // 검색어의 구두점 버전도 생성 ("there there" -> "there,there")
+        String punctuatedQuery = originalQuery.replaceAll("\\s+", ",");
+        
+        // 1. 완전 일치 (정규화된 버전)
+        if (trackTitle.equals(normalizedQuery)) {
+            score += 10000.0;
+            
+            if (track.getPopularity() != null) {
+                score += track.getPopularity() * 100.0;
+            }
+            
+            // 정규 버전 보너스 (Live 버전보다 우선순위)
+            if (!originalTrackTitle.contains("live") && 
+                !originalTrackTitle.contains("remix") && 
+                !originalTrackTitle.contains("remaster") &&
+                !originalTrackTitle.contains("acoustic") &&
+                !originalTrackTitle.contains("demo")) {
+                score += 8000.0; // 보너스 증가
+            }
+            
+            return score;
+        }
+        
+        // 2. 원본 제목과 검색어 직접 비교 (구두점 포함)
+        if (originalTitleLower.equals(queryLower)) {
+            score += 9500.0;
+            
+            if (track.getPopularity() != null) {
+                score += track.getPopularity() * 100.0;
+            }
+            
+            // 정규 버전 보너스
+            if (!originalTrackTitle.contains("live") && 
+                !originalTrackTitle.contains("remix") && 
+                !originalTrackTitle.contains("remaster")) {
+                score += 8000.0; // 보너스 증가
+            }
+            
+            return score;
+        }
+        
+        // 3. 구두점 변환된 검색어와 원본 제목 비교 ("there there" vs "There,There")
+        if (originalTitleLower.equals(punctuatedQuery.toLowerCase())) {
+            score += 9500.0;
+            
+            if (track.getPopularity() != null) {
+                score += track.getPopularity() * 100.0;
+            }
+            
+            // 정규 버전 보너스
+            if (!originalTrackTitle.contains("live") && 
+                !originalTrackTitle.contains("remix") && 
+                !originalTrackTitle.contains("remaster")) {
+                score += 8000.0; // 보너스 증가
+            }
+            
+            return score;
+        }
+        
+        // 4. 검색어가 제목의 시작이나 끝과 정확히 일치하는 경우만
+        if (trackTitle.startsWith(normalizedQuery + " ") || 
+            trackTitle.endsWith(" " + normalizedQuery) ||
+            originalTitleLower.startsWith(queryLower + " ") ||
+            originalTitleLower.endsWith(" " + queryLower) ||
+            originalTitleLower.startsWith(punctuatedQuery.toLowerCase() + " ") ||
+            originalTitleLower.endsWith(" " + punctuatedQuery.toLowerCase())) {
+            
+            score += 7000.0;
+            
+            if (track.getPopularity() != null) {
+                score += track.getPopularity() * 50.0;
+            }
+            
+            // 정규 버전 보너스
+            if (!originalTrackTitle.contains("live") && 
+                !originalTrackTitle.contains("remix") && 
+                !originalTrackTitle.contains("remaster")) {
+                score += 3000.0;
+            }
+            
+            return score;
+        }
+        
+        // 5. 그 외의 경우는 모두 제외 (0점 반환)
+        return 0.0;
+    }
+
+    /**
+     * 점수와 함께 트랙을 저장하는 내부 클래스
+     */
+    private static class TrackWithScore {
+        final TrackDto track;
+        final double score;
+        
+        TrackWithScore(TrackDto track, double score) {
+            this.track = track;
+            this.score = score;
         }
     }
 }

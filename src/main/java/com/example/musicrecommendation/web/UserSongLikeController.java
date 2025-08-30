@@ -5,6 +5,7 @@ import com.example.musicrecommendation.domain.UserSongLikeRepository;
 import com.example.musicrecommendation.service.UserSongLikeService;
 import com.example.musicrecommendation.web.dto.LikeResponse;
 import com.example.musicrecommendation.web.dto.LikeToggleResponse;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -193,5 +194,131 @@ public class UserSongLikeController {
 
         long totalCount = userSongLikeService.getTotalLikeCount();
         return ResponseEntity.ok(totalCount);
+    }
+
+    /**
+     * 외부 음악 서비스(Spotify 등)에서 가져온 곡 좋아요 추가
+     */
+    @PostMapping("/song")
+    @Operation(summary = "외부 음악 좋아요",
+            description = "Spotify 등 외부 서비스의 음악에 좋아요를 추가합니다.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "좋아요 추가 성공"),
+            @ApiResponse(responseCode = "400", description = "잘못된 요청")
+    })
+    public ResponseEntity<LikeToggleResponse> likeExternalSong(
+            @RequestBody ExternalSongLikeRequest request) {
+
+        try {
+            // 현재는 기본 사용자 ID 1 사용 (나중에 인증에서 가져오도록 수정 가능)
+            Long userId = 1L;
+            
+            boolean liked = userSongLikeService.likeExternalSong(
+                    userId,
+                    request.getSongId(),
+                    request.getTitle(),
+                    request.getArtist(),
+                    request.getImageUrl()
+            );
+            
+            // songId를 Long으로 파싱 (Spotify ID를 해시코드로 변환)
+            Long songIdAsLong = (long) request.getSongId().hashCode();
+            long totalLikes = userSongLikeService.getSongLikeCount(songIdAsLong);
+
+            LikeToggleResponse response = new LikeToggleResponse(userId, songIdAsLong, liked, totalLikes);
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    /**
+     * 외부 음악 서비스 곡 좋아요 취소
+     */
+    @DeleteMapping("/song/{songId}")
+    @Operation(summary = "외부 음악 좋아요 취소",
+            description = "Spotify 등 외부 서비스의 음악 좋아요를 취소합니다.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "좋아요 취소 성공"),
+            @ApiResponse(responseCode = "404", description = "좋아요를 찾을 수 없음")
+    })
+    public ResponseEntity<LikeToggleResponse> unlikeExternalSong(
+            @PathVariable String songId) {
+
+        try {
+            // 현재는 기본 사용자 ID 1 사용
+            Long userId = 1L;
+            
+            boolean liked = userSongLikeService.unlikeExternalSong(userId, songId);
+            
+            // songId를 Long으로 파싱 (Spotify ID를 해시코드로 변환)
+            Long songIdAsLong = (long) songId.hashCode();
+            long totalLikes = userSongLikeService.getSongLikeCount(songIdAsLong);
+
+            LikeToggleResponse response = new LikeToggleResponse(userId, songIdAsLong, liked, totalLikes);
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * 외부 음악 좋아요 요청 DTO
+     */
+    public static class ExternalSongLikeRequest {
+        
+        @JsonProperty("songId")
+        private String songId;
+        
+        @JsonProperty("title")
+        private String title;
+        
+        @JsonProperty("artist")
+        private String artist;
+        
+        @JsonProperty("imageUrl")
+        private String imageUrl;
+        
+        @JsonProperty("externalId")
+        private String externalId;
+        
+        @JsonProperty("album")
+        private String album;
+        
+        @JsonProperty("previewUrl")
+        private String previewUrl;
+        
+        @JsonProperty("spotifyUrl")
+        private String spotifyUrl;
+
+        // 기본 생성자
+        public ExternalSongLikeRequest() {}
+
+        // Getters and Setters
+        public String getSongId() { return songId; }
+        public void setSongId(String songId) { this.songId = songId; }
+        
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        
+        public String getArtist() { return artist; }
+        public void setArtist(String artist) { this.artist = artist; }
+        
+        public String getImageUrl() { return imageUrl; }
+        public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+        
+        public String getExternalId() { return externalId; }
+        public void setExternalId(String externalId) { this.externalId = externalId; }
+        
+        public String getAlbum() { return album; }
+        public void setAlbum(String album) { this.album = album; }
+        
+        public String getPreviewUrl() { return previewUrl; }
+        public void setPreviewUrl(String previewUrl) { this.previewUrl = previewUrl; }
+        
+        public String getSpotifyUrl() { return spotifyUrl; }
+        public void setSpotifyUrl(String spotifyUrl) { this.spotifyUrl = spotifyUrl; }
     }
 }

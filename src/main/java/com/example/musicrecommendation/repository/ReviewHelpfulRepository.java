@@ -18,6 +18,8 @@ public interface ReviewHelpfulRepository extends JpaRepository<ReviewHelpful, Lo
     
     long countByReviewId(Long reviewId);
     
+    List<ReviewHelpful> findByUserId(Long userId);
+    
     @Query("SELECT rh.reviewId FROM ReviewHelpful rh WHERE rh.userId = :userId AND rh.reviewId IN :reviewIds")
     List<Long> findHelpfulReviewIdsByUserAndReviewIds(@Param("userId") Long userId, @Param("reviewIds") List<Long> reviewIds);
 }
