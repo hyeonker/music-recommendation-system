@@ -2,6 +2,7 @@ package com.example.musicrecommendation.service;
 
 import com.example.musicrecommendation.domain.*;
 import com.example.musicrecommendation.repository.*;
+import com.example.musicrecommendation.domain.ReviewReport;
 import com.example.musicrecommendation.security.ReviewSecurityService;
 import com.example.musicrecommendation.web.dto.ReviewDto;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class MusicReviewService {
     private final UserBadgeService badgeService;
     private final ReviewSecurityService securityService;
     private final ReviewHelpfulRepository reviewHelpfulRepository;
+    private final ReviewReportRepository reviewReportRepository;
     private final UserService userService;
     
     @Transactional
@@ -317,5 +319,85 @@ public class MusicReviewService {
                 .orElse("알 수 없는 사용자");
         
         return ReviewDto.Response.fromWithUserNickname(review, userNickname);
+    }
+    
+    /**
+     * 추천 시스템용: 사용자의 높은 평점 리뷰 조회
+     */
+    public List<MusicReview> getHighRatedReviewsByUser(Long userId, Integer minRating) {
+        return reviewRepository.findByUserIdAndRatingGreaterThanEqual(userId, minRating);
+    }
+    
+    /**
+     * 추천 시스템용: 사용자 작성 리뷰 + 도움이 됨 표시한 리뷰 조회
+     */
+    public List<MusicReview> getReviewsForRecommendations(Long userId, Integer minRating) {
+        List<MusicReview> reviews = reviewRepository.findReviewsForRecommendations(userId, minRating);
+        
+        // MusicItem을 강제로 로딩 (native query로 인해 lazy loading 문제 해결)
+        reviews.forEach(review -> {
+            if (review.getMusicItem() != null) {
+                musicItemRepository.findById(review.getMusicItem().getId())
+                    .ifPresent(review::setMusicItem);
+            }
+        });
+        
+        return reviews;
+    }
+    
+    /**
+     * 리뷰 신고하기
+     */
+    @Transactional
+    public ReviewReport reportReview(Long reviewId, Long reporterUserId, ReviewReport.ReportReason reason, String description) {
+        log.info("리뷰 신고 처리 시작: reviewId={}, reporterUserId={}, reason={}", reviewId, reporterUserId, reason);
+        
+        // 리뷰 존재 확인
+        MusicReview review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new IllegalArgumentException("리뷰를 찾을 수 없습니다."));
+        
+        // 자신의 리뷰는 신고할 수 없음
+        if (review.getUserId().equals(reporterUserId)) {
+            throw new IllegalStateException("자신의 리뷰는 신고할 수 없습니다.");
+        }
+        
+        // 이미 신고한 경우 중복 방지
+        if (reviewReportRepository.existsByReviewIdAndReporterUserId(reviewId, reporterUserId)) {
+            throw new IllegalStateException("이미 신고 접수된 내역입니다.");
+        }
+        
+        // 신고 생성
+        ReviewReport report = ReviewReport.builder()
+                .reviewId(reviewId)
+                .reporterUserId(reporterUserId)
+                .reason(reason)
+                .description(description)
+                .build();
+        
+        ReviewReport savedReport = reviewReportRepository.save(report);
+        
+        // 신고 건수 증가
+        long reportCount = reviewReportRepository.countByReviewId(reviewId);
+        review.setReportCount((int) reportCount);
+        reviewRepository.save(review);
+        
+        log.info("리뷰 신고 완료 - 신고 ID: {}, 리뷰 ID: {}, 총 신고 건수: {}", 
+                savedReport.getId(), reviewId, reportCount);
+        
+        return savedReport;
+    }
+    
+    /**
+     * 리뷰의 신고 건수 조회
+     */
+    public long getReportCount(Long reviewId) {
+        return reviewReportRepository.countByReviewId(reviewId);
+    }
+    
+    /**
+     * 사용자가 특정 리뷰를 신고했는지 확인
+     */
+    public boolean hasUserReportedReview(Long reviewId, Long userId) {
+        return reviewReportRepository.existsByReviewIdAndReporterUserId(reviewId, userId);
     }
 }

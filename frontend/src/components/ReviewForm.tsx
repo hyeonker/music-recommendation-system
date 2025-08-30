@@ -1,22 +1,62 @@
 import React, { useState } from 'react';
 import { Star, Send, X } from 'lucide-react';
+import { validateInput, validateReviewText } from '../utils/security';
 
 interface ReviewFormProps {
-  onClose: () => void;
-  onSubmit: (reviewData: any) => void;
+  mode?: 'create' | 'edit';
+  initialData?: {
+    reviewId?: number;
+    externalId?: string;
+    itemType?: string;
+    musicName?: string;
+    artistName?: string;
+    albumName?: string;
+    imageUrl?: string;
+    rating?: number;
+    reviewText?: string;
+    tags?: string[];
+  };
+  onClose?: () => void;
+  onSubmit?: (reviewData: any) => void;
+  onSuccess?: () => void;
+  onCancel?: () => void;
 }
 
-const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
+const ReviewForm: React.FC<ReviewFormProps> = ({ 
+  mode = 'create',
+  initialData,
+  onClose,
+  onSubmit,
+  onSuccess,
+  onCancel
+}) => {
+  // 편집 모드일 때 초기 데이터 설정
+  const isEditMode = mode === 'edit';
+  
   // 2단계 검색 상태들
-  const [artistSearch, setArtistSearch] = useState('');
-  const [selectedArtist, setSelectedArtist] = useState<any>(null);
-  const [songSearch, setSongSearch] = useState('');
-  const [selectedMusic, setSelectedMusic] = useState<any>(null);
+  const [artistSearch, setArtistSearch] = useState(initialData?.artistName || '');
+  const [selectedArtist, setSelectedArtist] = useState<any>(
+    isEditMode && initialData ? {
+      name: initialData.artistName,
+      displayName: initialData.artistName,
+    } : null
+  );
+  const [songSearch, setSongSearch] = useState(initialData?.musicName || '');
+  const [selectedMusic, setSelectedMusic] = useState<any>(
+    isEditMode && initialData ? {
+      id: initialData.externalId,
+      name: initialData.musicName,
+      displayName: initialData.musicName,
+      imageUrl: initialData.imageUrl,
+      artists: [{ name: initialData.artistName }],
+      album: { name: initialData.albumName }
+    } : null
+  );
   
   // 기본 상태들
-  const [rating, setRating] = useState(5);
-  const [reviewText, setReviewText] = useState('');
-  const [tags, setTags] = useState('');
+  const [rating, setRating] = useState(initialData?.rating || 5);
+  const [reviewText, setReviewText] = useState(initialData?.reviewText || '');
+  const [tags, setTags] = useState(initialData?.tags ? initialData.tags.join(', ') : '');
   const [isPublic, setIsPublic] = useState(true);
   
   // 검색 관련 상태들
@@ -137,38 +177,68 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedMusic) {
+    if (!selectedMusic && !isEditMode) {
       alert('음악을 선택해주세요');
       return;
     }
 
-    const reviewData = {
-      externalId: selectedMusic.id,
-      itemType: selectedMusic.itemType || 'TRACK',
-      musicName: selectedMusic.displayName || selectedMusic.name,
-      artistName: selectedMusic.itemType === 'ARTIST' 
-        ? selectedMusic.displayName || selectedMusic.name
-        : selectedMusic.artists?.map((a: any) => a.name).join(', ') || selectedMusic.displaySubtitle,
-      albumName: selectedMusic.album?.name,
-      imageUrl: selectedMusic.imageUrl || selectedMusic.image,
-      rating,
-      reviewText: reviewText.trim(),
-      tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0),
-      isPublic,
-      isSpoiler: false
-    };
+    if (isEditMode) {
+      // 편집 모드일 때는 PUT 요청
+      try {
+        const updateData = {
+          rating,
+          reviewText: reviewText.trim(),
+          tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0),
+        };
 
-    console.log('=== ReviewForm에서 전송하는 데이터 ===');
-    console.log('selectedMusic:', selectedMusic);
-    console.log('reviewData:', reviewData);
-    console.log('externalId:', reviewData.externalId);
-    console.log('musicName:', reviewData.musicName);
-    console.log('artistName:', reviewData.artistName);
-    console.log('=====================');
+        const response = await fetch(`/api/reviews/${initialData?.reviewId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify(updateData),
+        });
 
-    onSubmit(reviewData);
+        if (response.ok) {
+          onSuccess?.();
+        } else {
+          alert('리뷰 수정에 실패했습니다.');
+        }
+      } catch (error) {
+        console.error('Edit error:', error);
+        alert('리뷰 수정 중 오류가 발생했습니다.');
+      }
+    } else {
+      // 생성 모드일 때는 기존 로직
+      const reviewData = {
+        externalId: selectedMusic.id,
+        itemType: selectedMusic.itemType || 'TRACK',
+        musicName: selectedMusic.displayName || selectedMusic.name,
+        artistName: selectedMusic.itemType === 'ARTIST' 
+          ? selectedMusic.displayName || selectedMusic.name
+          : selectedMusic.artists?.map((a: any) => a.name).join(', ') || selectedMusic.displaySubtitle,
+        albumName: selectedMusic.album?.name,
+        imageUrl: selectedMusic.imageUrl || selectedMusic.image,
+        rating,
+        reviewText: reviewText.trim(),
+        tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0),
+        isPublic,
+        isSpoiler: false
+      };
+
+      console.log('=== ReviewForm에서 전송하는 데이터 ===');
+      console.log('selectedMusic:', selectedMusic);
+      console.log('reviewData:', reviewData);
+      console.log('externalId:', reviewData.externalId);
+      console.log('musicName:', reviewData.musicName);
+      console.log('artistName:', reviewData.artistName);
+      console.log('=====================');
+
+      onSubmit?.(reviewData);
+    }
   };
 
   const renderStars = () => {
@@ -193,9 +263,11 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
       <div className="bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white/20 shadow-2xl">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-white">음악 리뷰 작성</h2>
+          <h2 className="text-2xl font-bold text-white">
+            {isEditMode ? '리뷰 수정' : '음악 리뷰 작성'}
+          </h2>
           <button
-            onClick={onClose}
+            onClick={onClose || onCancel}
             className="text-blue-200 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors"
           >
             <X className="w-6 h-6" />
@@ -203,8 +275,11 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* 1단계: 아티스트 검색 */}
-          <div>
+          {/* 편집 모드가 아닐 때만 음악 선택 표시 */}
+          {!isEditMode && (
+            <>
+              {/* 1단계: 아티스트 검색 */}
+              <div>
             <label className="block text-blue-200 text-sm font-medium mb-2">
               1단계: 아티스트 검색 *
             </label>
@@ -213,7 +288,14 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
                 type="text"
                 value={artistSearch}
                 onChange={(e) => {
-                  const value = e.target.value;
+                  const rawValue = e.target.value;
+                  const validation = validateInput(rawValue, '아티스트 검색');
+                  if (!validation.isValid) {
+                    alert(validation.error || '올바르지 않은 검색어입니다');
+                    return;
+                  }
+                  
+                  const value = validation.sanitized;
                   setArtistSearch(value);
                   
                   // 아티스트 검색어가 변경되면 선택된 아티스트와 곡 초기화
@@ -344,7 +426,14 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
                   type="text"
                   value={songSearch}
                   onChange={(e) => {
-                    const value = e.target.value;
+                    const rawValue = e.target.value;
+                    const validation = validateInput(rawValue, '곡 검색');
+                    if (!validation.isValid) {
+                      alert(validation.error || '올바르지 않은 검색어입니다');
+                      return;
+                    }
+                    
+                    const value = validation.sanitized;
                     setSongSearch(value);
                     
                     if (value !== selectedMusic?.name) {
@@ -422,39 +511,60 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
             </div>
           )}
 
-          {/* 선택된 곡 표시 */}
-          {selectedMusic && (
-            <div className="mt-3 p-4 bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 flex items-center space-x-3">
+              {/* 선택된 곡 표시 */}
+              {selectedMusic && (
+                <div className="mt-3 p-4 bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 flex items-center space-x-3">
+                  <img
+                    src={selectedMusic.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`}
+                    alt={selectedMusic.displayName}
+                    className="w-12 h-12 rounded-full object-cover shadow-md"
+                    onError={(e) => {
+                      const t = e.currentTarget as HTMLImageElement;
+                      t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`;
+                    }}
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-white flex items-center">
+                      {selectedMusic.displayName}
+                      <span className="ml-2 px-2 py-1 text-xs rounded-full bg-green-500/30 text-green-200">
+                        선택된 곡
+                      </span>
+                    </div>
+                    <div className="text-sm text-blue-200">
+                      {selectedMusic.displaySubtitle}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMusic(null);
+                      setSongSearch('');
+                    }}
+                    className="text-red-400 hover:text-red-300 p-1 rounded-full hover:bg-white/10 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          
+          {/* 편집 모드에서는 기존 음악 정보 표시 */}
+          {isEditMode && initialData && (
+            <div className="p-4 bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 flex items-center space-x-3">
               <img
-                src={selectedMusic.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`}
-                alt={selectedMusic.displayName}
+                src={initialData.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(initialData.musicName || '')}&backgroundColor=random`}
+                alt={initialData.musicName}
                 className="w-12 h-12 rounded-full object-cover shadow-md"
-                onError={(e) => {
-                  const t = e.currentTarget as HTMLImageElement;
-                  t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`;
-                }}
               />
               <div className="flex-1">
-                <div className="font-medium text-white flex items-center">
-                  {selectedMusic.displayName}
-                  <span className="ml-2 px-2 py-1 text-xs rounded-full bg-green-500/30 text-green-200">
-                    선택된 곡
-                  </span>
+                <div className="font-medium text-white">
+                  {initialData.musicName}
                 </div>
                 <div className="text-sm text-blue-200">
-                  {selectedMusic.displaySubtitle}
+                  {initialData.artistName}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedMusic(null);
-                  setSongSearch('');
-                }}
-                className="text-red-400 hover:text-red-300 p-1 rounded-full hover:bg-white/10 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
             </div>
           )}
 
@@ -473,7 +583,15 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
             </label>
             <textarea
               value={reviewText}
-              onChange={(e) => setReviewText(e.target.value)}
+              onChange={(e) => {
+                const rawValue = e.target.value;
+                const validation = validateReviewText(rawValue);
+                if (!validation.isValid) {
+                  alert(validation.error || '리뷰에 허용되지 않는 내용이 포함되어 있습니다');
+                  return;
+                }
+                setReviewText(validation.sanitized);
+              }}
               placeholder="이 음악에 대한 생각을 자유롭게 작성해보세요..."
               rows={4}
               maxLength={2000}
@@ -492,7 +610,15 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
             <input
               type="text"
               value={tags}
-              onChange={(e) => setTags(e.target.value)}
+              onChange={(e) => {
+                const rawValue = e.target.value;
+                const validation = validateInput(rawValue, '태그');
+                if (!validation.isValid) {
+                  alert(validation.error || '태그에 허용되지 않는 내용이 포함되어 있습니다');
+                  return;
+                }
+                setTags(validation.sanitized);
+              }}
               placeholder="태그를 쉼표로 구분해서 입력하세요 (예: 신남, 감성, 추천)"
               className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
@@ -518,18 +644,18 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
           <div className="flex justify-end space-x-3 pt-4">
             <button
               type="button"
-              onClick={onClose}
+              onClick={onClose || onCancel}
               className="px-6 py-2 text-blue-200 border border-white/30 rounded-lg hover:bg-white/10 transition-colors"
             >
               취소
             </button>
             <button
               type="submit"
-              disabled={!selectedMusic}
+              disabled={!isEditMode && !selectedMusic}
               className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed flex items-center space-x-2 transition-all transform hover:scale-105"
             >
               <Send className="w-4 h-4" />
-              <span>리뷰 등록</span>
+              <span>{isEditMode ? '수정 완료' : '리뷰 등록'}</span>
             </button>
           </div>
         </form>

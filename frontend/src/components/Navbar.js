@@ -1,13 +1,52 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
-    Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star
+    Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star, Shield
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 
 const Navbar = ({ darkMode, toggleDarkMode }) => {
     const location = useLocation();
     const { user } = useUser();
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    // 관리자 권한 확인 - 로그인 상태도 함께 확인
+    useEffect(() => {
+        const checkAdminAuth = async () => {
+            try {
+                // 먼저 로그인 상태 확인
+                const authResponse = await fetch('/api/auth/me', {
+                    credentials: 'include'
+                });
+                
+                if (!authResponse.ok) {
+                    setIsAdmin(false);
+                    return;
+                }
+                
+                const authData = await authResponse.json();
+                if (!authData.authenticated) {
+                    setIsAdmin(false);
+                    return;
+                }
+                
+                // 로그인되어 있으면 관리자 권한 확인
+                const adminResponse = await fetch('/api/admin/reports/stats', {
+                    credentials: 'include'
+                });
+                
+                if (adminResponse.ok) {
+                    setIsAdmin(true);
+                } else {
+                    setIsAdmin(false);
+                }
+            } catch (error) {
+                setIsAdmin(false);
+            }
+        };
+        
+        checkAdminAuth();
+    }, []);
 
     const navItems = [
         { path: '/dashboard', icon: Home,    label: '홈' },
@@ -16,6 +55,8 @@ const Navbar = ({ darkMode, toggleDarkMode }) => {
         { path: '/reviews',   icon: Star,          label: '리뷰' },
         { path: '/stats',     icon: BarChart3,     label: '통계' },
         { path: '/profile',   icon: Settings,      label: '프로필' },
+        // 관리자만 볼 수 있는 메뉴
+        ...(isAdmin ? [{ path: '/admin', icon: Shield, label: '관리자' }] : []),
     ];
 
     const baseLink =

@@ -11,6 +11,7 @@ import Chat from './pages/Chat';
 import Stats from './pages/Stats';
 import Profile from './pages/Profile';
 import Reviews from './pages/Reviews';
+import AdminPanel from './pages/AdminPanel';
 import LoadingSpinner from './components/LoadingSpinner';
 import RequireAuth from './components/RequireAuth';   // ⭐ 추가: 로그인 가드
 import SocialAuth from './components/SocialAuth';     // ⭐ 선택: /login 전용 페이지에서 사용
@@ -50,6 +51,25 @@ function App() {
     useEffect(() => {
         const loadingTimer = setTimeout(() => setIsLoading(false), 800);
         return () => clearTimeout(loadingTimer);
+    }, []);
+    
+    // 앱 시작시 OAuth 사용자 정보 확인
+    useEffect(() => {
+        const checkAuth = async () => {
+            try {
+                const response = await fetch('/api/auth/me', { credentials: 'include' });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.authenticated && data.user) {
+                        setUser({ id: data.user.id, name: data.user.name });
+                    }
+                }
+            } catch (error) {
+                // 로그인 안된 상태면 기본값 유지
+            }
+        };
+        
+        checkAuth();
     }, []);
 
     // ⭐ darkMode 상태에 따라 html class 토글 (이 방식이 버그 적음)
@@ -99,6 +119,7 @@ function App() {
                                         <Route path="/chat" element={<Chat />} />
                                         <Route path="/stats" element={<Stats />} />
                                         <Route path="/reviews" element={<Reviews />} />
+                                        <Route path="/admin" element={<AdminPanel />} />
 
                                         {/* ⭐ 로그인 필요: /profile */}
                                         <Route

@@ -48,4 +48,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * @return 존재하면 true, 없으면 false
      */
     boolean existsByProviderAndProviderId(AuthProvider provider, String providerId);
+    
+    /**
+     * 닉네임 존재 여부 확인
+     *
+     * @param name 확인할 닉네임
+     * @return 존재하면 true, 없으면 false
+     */
+    boolean existsByName(String name);
+    
+    /**
+     * 특정 사용자를 제외한 닉네임 존재 여부 확인
+     *
+     * @param name 확인할 닉네임
+     * @param excludeId 제외할 사용자 ID
+     * @return 중복되면 true, 없으면 false
+     */
+    boolean existsByNameAndIdNot(String name, Long excludeId);
 }

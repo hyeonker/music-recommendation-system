@@ -62,4 +62,21 @@ public interface MusicReviewRepository extends JpaRepository<MusicReview, Long> 
     @Query(value = "SELECT DISTINCT UNNEST(tags) as tag FROM music_reviews WHERE is_public = true ORDER BY tag", 
            nativeQuery = true)
     List<String> findAllTags();
+    
+    /**
+     * 사용자의 높은 평점 리뷰 조회 (추천 시스템용)
+     */
+    @Query("SELECT r FROM MusicReview r LEFT JOIN FETCH r.musicItem WHERE r.userId = :userId AND r.rating >= :minRating AND r.isPublic = true ORDER BY r.rating DESC, r.createdAt DESC")
+    List<MusicReview> findByUserIdAndRatingGreaterThanEqual(@Param("userId") Long userId, @Param("minRating") Integer minRating);
+    
+    /**
+     * 추천 시스템용: 사용자가 작성한 리뷰 + 사용자가 도움이 됨으로 표시한 리뷰
+     */
+    @Query(value = "SELECT DISTINCT r.* FROM music_reviews r " +
+           "WHERE ((r.user_id = :userId AND r.rating >= :minRating) " +
+           "OR (r.id IN (SELECT rh.review_id FROM review_helpful rh WHERE rh.user_id = :userId) AND r.rating >= :minRating)) " +
+           "AND r.is_public = true " +
+           "ORDER BY r.rating DESC, r.created_at DESC", 
+           nativeQuery = true)
+    List<MusicReview> findReviewsForRecommendations(@Param("userId") Long userId, @Param("minRating") Integer minRating);
 }

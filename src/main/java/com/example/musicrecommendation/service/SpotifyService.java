@@ -77,7 +77,10 @@ public class SpotifyService {
      * 토큰 유효성 체크 및 필요 시 갱신
      */
     private void ensureValidToken() {
+        log.debug("토큰 체크: accessToken={}, 현재시간={}, 만료시간={}", 
+            accessToken != null ? "exists" : "null", System.currentTimeMillis(), tokenExpiryTime);
         if (accessToken == null || System.currentTimeMillis() >= tokenExpiryTime) {
+            log.info("토큰 갱신 필요 - 새로운 토큰 요청 중...");
             authenticateWithSpotify();
         }
     }
@@ -285,6 +288,8 @@ public class SpotifyService {
     
     
     private List<TrackDto> performTrackSearch(String query, int limit) {
+        ensureValidToken();
+        
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Bearer " + accessToken);

@@ -192,6 +192,57 @@ public class UserController {
     }
     
     /**
+     * 모든 사용자 조회 (임시 - 권한 체크 제거)
+     */
+    @GetMapping("/all")
+    @Operation(summary = "전체 사용자 조회", description = "모든 사용자 정보를 조회합니다. (임시)")
+    @ApiResponse(responseCode = "200", description = "조회 성공")
+    public ResponseEntity<List<UserResponse>> getAllUsersForAdmin() {
+        
+        List<User> users = userService.findAllUsers();
+        List<UserResponse> responses = users.stream()
+                .map(UserResponse::from)
+                .toList();
+        
+        return ResponseEntity.ok(responses);
+    }
+    
+    /**
+     * 닉네임 중복 확인
+     */
+    @GetMapping("/check-name/{name}")
+    @Operation(summary = "닉네임 중복 확인", description = "닉네임이 이미 사용 중인지 확인합니다.")
+    @ApiResponse(responseCode = "200", description = "확인 완료")
+    public ResponseEntity<Map<String, Object>> checkNameExists(
+            @Parameter(description = "확인할 닉네임", example = "뮤직러버")
+            @PathVariable String name,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        try {
+            // 현재 사용자의 ID를 가져오기
+            Long currentUserId = null;
+            if (oauth2User != null) {
+                String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+                if (email != null) {
+                    currentUserId = userService.findUserByEmail(email)
+                            .map(User::getId)
+                            .orElse(null);
+                }
+            }
+            
+            boolean exists = userService.isNameExistsExcludingUser(name, currentUserId);
+            return ResponseEntity.ok(Map.of("exists", exists));
+            
+        } catch (IllegalArgumentException e) {
+            // 유효성 검사 실패 시 400 에러와 메시지 반환
+            return ResponseEntity.badRequest().body(Map.of(
+                "exists", false,
+                "error", e.getMessage()
+            ));
+        }
+    }
+    
+    /**
      * 현재 로그인한 사용자 정보 조회
      */
     @GetMapping("/me")
@@ -237,6 +288,11 @@ public class UserController {
         try {
             User user = userService.findUserByEmail(email)
                     .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다"));
+            
+            // 닉네임 중복 체크 (자신은 제외)
+            if (userService.isNameExistsExcludingUser(newName.trim(), user.getId())) {
+                return ResponseEntity.badRequest().build();
+            }
                     
             User updatedUser = userService.updateUserProfile(
                     user.getId(),
@@ -272,5 +328,98 @@ public class UserController {
         }
         
         return null;
+    }
+
+    /**
+     * 사용자 계정 정지 (관리자용)
+     */
+    @PostMapping("/{userId}/suspend")
+    @Operation(summary = "사용자 계정 정지", description = "관리자가 사용자 계정을 정지합니다.")
+    public ResponseEntity<Map<String, String>> suspendUser(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        if (oauth2User == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+        if (!userService.isAdminByEmail(email)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        
+        try {
+            userService.suspendUser(userId);
+            return ResponseEntity.ok()
+                    .header("Content-Type", "application/json")
+                    .body(Map.of("message", "사용자가 정지되었습니다."));
+        } catch (Exception e) {
+            e.printStackTrace(); // 콘솔에 스택 트레이스 출력
+            return ResponseEntity.badRequest()
+                    .header("Content-Type", "application/json")
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * 사용자 계정 활성화 (관리자용)
+     */
+    @PostMapping("/{userId}/activate")
+    @Operation(summary = "사용자 계정 활성화", description = "관리자가 정지된 사용자 계정을 활성화합니다.")
+    public ResponseEntity<Map<String, String>> activateUser(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        if (oauth2User == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+        if (!userService.isAdminByEmail(email)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        
+        try {
+            userService.activateUser(userId);
+            return ResponseEntity.ok()
+                    .header("Content-Type", "application/json")
+                    .body(Map.of("message", "사용자가 활성화되었습니다."));
+        } catch (Exception e) {
+            e.printStackTrace(); // 콘솔에 스택 트레이스 출력
+            return ResponseEntity.badRequest()
+                    .header("Content-Type", "application/json")
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * 사용자 계정 탈퇴 처리 (관리자용)
+     */
+    @PostMapping("/{userId}/delete")
+    @Operation(summary = "사용자 계정 탈퇴", description = "관리자가 사용자 계정을 탈퇴 처리합니다.")
+    public ResponseEntity<Map<String, String>> deleteUser(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        if (oauth2User == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+        if (!userService.isAdminByEmail(email)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        
+        try {
+            userService.deleteUser(userId); // 하드 삭제로 변경
+            return ResponseEntity.ok()
+                    .header("Content-Type", "application/json")
+                    .body(Map.of("message", "사용자가 완전히 삭제되었습니다."));
+        } catch (Exception e) {
+            e.printStackTrace(); // 콘솔에 스택 트레이스 출력
+            return ResponseEntity.badRequest()
+                    .header("Content-Type", "application/json")
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 }

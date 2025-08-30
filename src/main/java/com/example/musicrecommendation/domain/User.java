@@ -66,6 +66,13 @@ public class User {
     private LocalDateTime updatedAt;
 
     /**
+     * 사용자 상태 (ACTIVE, SUSPENDED, DELETED)
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "varchar(255) default 'ACTIVE'")
+    private UserStatus status = UserStatus.ACTIVE;
+
+    /**
      * JPA 기본 생성자 (protected로 외부 생성 방지)
      */
     protected User() {}
@@ -121,6 +128,10 @@ public class User {
         return updatedAt;
     }
 
+    public UserStatus getStatus() {
+        return status;
+    }
+
     // === 비즈니스 메서드 ===
 
     /**
@@ -133,6 +144,48 @@ public class User {
     public void updateProfile(String name, String profileImageUrl) {
         this.name = name;
         this.profileImageUrl = profileImageUrl;
+    }
+
+    /**
+     * 사용자 계정을 정지 상태로 변경
+     */
+    public void suspend() {
+        this.status = UserStatus.SUSPENDED;
+    }
+
+    /**
+     * 사용자 계정을 활성 상태로 복구
+     */
+    public void activate() {
+        this.status = UserStatus.ACTIVE;
+    }
+
+    /**
+     * 사용자 계정을 탈퇴 상태로 변경
+     */
+    public void delete() {
+        this.status = UserStatus.DELETED;
+    }
+
+    /**
+     * 활성 상태 확인
+     */
+    public boolean isActive() {
+        return this.status == UserStatus.ACTIVE;
+    }
+
+    /**
+     * 정지 상태 확인
+     */
+    public boolean isSuspended() {
+        return this.status == UserStatus.SUSPENDED;
+    }
+
+    /**
+     * 탈퇴 상태 확인
+     */
+    public boolean isDeleted() {
+        return this.status == UserStatus.DELETED;
     }
 
     /**

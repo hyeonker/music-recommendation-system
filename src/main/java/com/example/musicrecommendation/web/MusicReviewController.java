@@ -1,6 +1,7 @@
 package com.example.musicrecommendation.web;
 
 import com.example.musicrecommendation.domain.User;
+import com.example.musicrecommendation.domain.ReviewReport;
 import com.example.musicrecommendation.service.MusicReviewService;
 import com.example.musicrecommendation.service.UserService;
 import com.example.musicrecommendation.web.dto.ReviewDto;
@@ -254,6 +255,69 @@ public class MusicReviewController {
     public ResponseEntity<List<String>> getAllTags() {
         List<String> tags = reviewService.getAllTags();
         return ResponseEntity.ok(tags);
+    }
+    
+    @PostMapping("/{reviewId}/report")
+    public ResponseEntity<Map<String, Object>> reportReview(
+            @PathVariable Long reviewId,
+            @RequestBody Map<String, Object> reportRequest,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        try {
+            Long userId = getUserId(oauth2User);
+            String reasonStr = (String) reportRequest.get("reason");
+            String description = (String) reportRequest.get("description");
+            
+            ReviewReport.ReportReason reason = ReviewReport.ReportReason.valueOf(reasonStr);
+            
+            ReviewReport report = reviewService.reportReview(reviewId, userId, reason, description);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "신고가 접수되었습니다.",
+                "reportId", report.getId()
+            ));
+            
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", e.getMessage()
+            ));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", e.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("리뷰 신고 중 오류 발생", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "success", false,
+                "message", "신고 처리 중 오류가 발생했습니다."
+            ));
+        }
+    }
+    
+    @GetMapping("/{reviewId}/report-status")
+    public ResponseEntity<Map<String, Object>> getReportStatus(
+            @PathVariable Long reviewId,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        try {
+            Long userId = getUserId(oauth2User);
+            boolean hasReported = reviewService.hasUserReportedReview(reviewId, userId);
+            long reportCount = reviewService.getReportCount(reviewId);
+            
+            return ResponseEntity.ok(Map.of(
+                "hasReported", hasReported,
+                "reportCount", reportCount
+            ));
+            
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "hasReported", false,
+                "reportCount", 0
+            ));
+        }
     }
     
     private Long getUserId(OAuth2User oauth2User) {

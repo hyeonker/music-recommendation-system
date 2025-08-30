@@ -4,6 +4,7 @@ import { Save, Music, Search, X, Plus, Star, Heart, BarChart3 } from 'lucide-rea
 import api from '../api/client';
 import { toast } from 'react-hot-toast';
 import { useUser } from '../context/UserContext';
+import { validateInput, sanitizeText } from '../utils/security';
 import {
     fetchProfile as apiFetchProfile,
     saveProfile as apiSaveProfile,
@@ -105,6 +106,9 @@ const Profile: React.FC = () => {
     const [isSearching, setIsSearching] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [nameError, setNameError] = useState<string>('');
+    const [isCheckingName, setIsCheckingName] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false);
 
     // 드롭다운/요청 취소 refs
     const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -339,7 +343,97 @@ const Profile: React.FC = () => {
         });
     };
 
+    const validateName = (name: string) => {
+        if (!name || name.trim().length === 0) {
+            return '';
+        }
+        
+        const trimmedName = name.trim();
+        
+        // 길이 체크 (2-15자)
+        if (trimmedName.length < 2) {
+            return '닉네임은 최소 2자 이상이어야 합니다';
+        }
+        if (trimmedName.length > 15) {
+            return '닉네임은 최대 15자까지 가능합니다';
+        }
+        
+        // 관리자는 금지된 단어 체크 제외
+        if (isAdmin) {
+            return '';
+        }
+        
+        // 금지된 단어 체크
+        const forbiddenWords = [
+            '운영자', '관리자', '어드민', 'admin', 'administrator', 
+            '매니저', 'manager', '스태프', 'staff', '마스터', 'master',
+            '시스템', 'system', '루트', 'root', '슈퍼', 'super',
+            '모더레이터', 'moderator', 'mod', '개발자', 'developer',
+            'dev', '테스트', 'test', '공지', '공식', 'official'
+        ];
+        
+        const lowerName = trimmedName.toLowerCase();
+        for (const word of forbiddenWords) {
+            if (lowerName.includes(word.toLowerCase())) {
+                return '사용할 수 없는 닉네임입니다';
+            }
+        }
+        
+        return '';
+    };
+
+    const checkNameExists = async (name: string) => {
+        if (!name || name.trim().length === 0) {
+            setNameError('');
+            return;
+        }
+        
+        // 먼저 로컬 검증
+        const localValidationError = validateName(name);
+        if (localValidationError) {
+            setNameError(localValidationError);
+            return;
+        }
+        
+        try {
+            setIsCheckingName(true);
+            const response = await fetch(`/api/users/check-name/${encodeURIComponent(name.trim())}`, {
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.exists) {
+                    setNameError('이미 사용 중인 닉네임입니다');
+                } else {
+                    setNameError('');
+                }
+            } else if (response.status === 400) {
+                // 서버측 유효성 검사 실패
+                const data = await response.json();
+                setNameError(data.error || '사용할 수 없는 닉네임입니다');
+            } else if (response.status === 404) {
+                // API 엔드포인트가 없는 경우 - 서버가 준비되지 않았으므로 조용히 무시
+                setNameError('');
+            } else {
+                setNameError('닉네임 확인 중 오류가 발생했습니다');
+            }
+        } catch (error) {
+            console.error('닉네임 확인 오류:', error);
+            // 네트워크 오류인 경우 조용히 무시 (서버가 준비되지 않았을 수 있음)
+            setNameError('');
+        } finally {
+            setIsCheckingName(false);
+        }
+    };
+
     const onSaveProfile = async () => {
+        // 저장 전 이름 중복 체크
+        if (nameError) {
+            toast.error('닉네임 중복을 해결해주세요');
+            return;
+        }
+        
         try {
             setIsSaving(true);
             
@@ -356,6 +450,12 @@ const Profile: React.FC = () => {
             // 2. 기본 사용자 정보(이름) 저장
             if (profile.name) {
                 await updateMyBasicInfo(profile.name);
+                
+                // 3. UserContext 업데이트 (네비게이션 바에 즉시 반영)
+                setUser({
+                    id: userId,
+                    name: profile.name
+                });
             }
             
             // saved는 ServerProfile 타입이므로 as any로 합치고 normalize로 보정
@@ -363,7 +463,11 @@ const Profile: React.FC = () => {
             toast.success('프로필이 저장되었습니다!');
         } catch (e: any) {
             console.error('프로필 저장 실패:', e);
-            toast.error('프로필 저장에 실패했습니다');
+            if (e.response?.status === 400) {
+                toast.error('이미 사용 중인 닉네임입니다');
+            } else {
+                toast.error('프로필 저장에 실패했습니다');
+            }
         } finally {
             setIsSaving(false);
         }
@@ -378,11 +482,23 @@ const Profile: React.FC = () => {
                 const me = await fetchMe(); // { authenticated, user?: { id, ... } }
                 if (me?.authenticated && me?.user?.id) {
                     setUserId(me.user.id);
+                    
+                    // 관리자 권한 확인
+                    try {
+                        const adminResponse = await fetch('/api/admin/reports/stats', {
+                            credentials: 'include'
+                        });
+                        setIsAdmin(adminResponse.ok);
+                    } catch {
+                        setIsAdmin(false);
+                    }
                 } else {
                     setUserId(1);
+                    setIsAdmin(false);
                 }
             } catch {
                 setUserId(1);
+                setIsAdmin(false);
             }
         })();
     }, []);
@@ -403,6 +519,11 @@ const Profile: React.FC = () => {
                 
                 // 전역 사용자 정보도 업데이트
                 setUser({ id: userId, name: actualName });
+                
+                // 전역 이벤트로 모든 페이지에 이름 변경 알림
+                window.dispatchEvent(new CustomEvent('userNameChanged', { 
+                    detail: { id: userId, name: actualName } 
+                }));
                 
                 setProfile((prev) => normalizeProfile({ 
                     ...prev, 
@@ -426,6 +547,16 @@ const Profile: React.FC = () => {
         }, 400);
         return () => clearTimeout(t);
     }, [artistSearchQuery]);
+
+    // 이름 중복 체크 디바운스
+    useEffect(() => {
+        const t = setTimeout(() => {
+            if (profile.name && profile.name.trim().length > 0) {
+                checkNameExists(profile.name.trim());
+            }
+        }, 500);
+        return () => clearTimeout(t);
+    }, [profile.name]);
 
     // ESC로 드롭다운/검색 취소
     useEffect(() => {
@@ -491,30 +622,48 @@ const Profile: React.FC = () => {
                 {/* 기본 정보 */}
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
                     <h2 className="text-xl font-bold text-white mb-4">기본 정보</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="max-w-md">
                         <div>
                             <label className="block text-blue-200 text-sm mb-2">이름</label>
-                            <input
-                                type="text"
-                                value={profile.name ?? ''}
-                                onChange={(e) =>
-                                    setProfile((prev) => normalizeProfile({ ...prev, name: e.target.value }, userId))
-                                }
-                                className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="닉네임을 입력하세요"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-blue-200 text-sm mb-2">이메일</label>
-                            <input
-                                type="email"
-                                value={profile.email ?? ''}
-                                onChange={(e) =>
-                                    setProfile((prev) => normalizeProfile({ ...prev, email: e.target.value }, userId))
-                                }
-                                className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="이메일을 입력하세요"
-                            />
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={profile.name ?? ''}
+                                    maxLength={15}
+                                    onChange={(e) => {
+                                        const rawValue = e.target.value;
+                                        
+                                        // 보안 검증
+                                        const validation = validateInput(rawValue, '닉네임');
+                                        if (!validation.isValid) {
+                                            setNameError(validation.error || '올바르지 않은 입력입니다');
+                                            return;
+                                        }
+                                        
+                                        const newName = validation.sanitized;
+                                        setProfile((prev) => normalizeProfile({ ...prev, name: newName }, userId));
+                                        
+                                        // 빈 값일 때만 즉시 에러 초기화
+                                        if (newName.trim().length === 0) {
+                                            setNameError('');
+                                        }
+                                    }}
+                                    className={`w-full px-4 py-2 bg-white/20 border ${
+                                        nameError ? 'border-red-400' : 'border-white/30'
+                                    } rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 ${
+                                        nameError ? 'focus:ring-red-500' : 'focus:ring-blue-500'
+                                    }`}
+                                    placeholder="닉네임을 입력하세요 (2-15자)"
+                                />
+                                {isCheckingName && (
+                                    <div className="absolute right-3 top-3">
+                                        <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div>
+                                    </div>
+                                )}
+                            </div>
+                            {nameError && (
+                                <p className="text-red-400 text-xs mt-1">{nameError}</p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -535,7 +684,13 @@ const Profile: React.FC = () => {
                             <input
                                 type="text"
                                 value={artistSearchQuery}
-                                onChange={(e) => setArtistSearchQuery(e.target.value)}
+                                onChange={(e) => {
+                                    const rawValue = e.target.value;
+                                    const validation = validateInput(rawValue, '검색어');
+                                    if (validation.isValid) {
+                                        setArtistSearchQuery(validation.sanitized);
+                                    }
+                                }}
                                 className="w-full pl-10 pr-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 placeholder={isSearching ? '검색 중…' : '아티스트를 검색하세요...'}
                             />

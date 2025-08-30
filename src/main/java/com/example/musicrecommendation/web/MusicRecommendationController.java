@@ -2,24 +2,222 @@ package com.example.musicrecommendation.web;
 
 import com.example.musicrecommendation.service.MusicRecommendationEngine;
 import com.example.musicrecommendation.service.UserProfileService;
+import com.example.musicrecommendation.service.MusicReviewService;
+import com.example.musicrecommendation.service.SpotifyService;
+import com.example.musicrecommendation.domain.MusicReview;
+import com.example.musicrecommendation.web.dto.ProfileDto;
+import com.example.musicrecommendation.web.dto.spotify.TrackDto;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/recommendations")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class MusicRecommendationController {
     
     private final MusicRecommendationEngine recommendationEngine;
     private final UserProfileService userProfileService;
+    private final MusicReviewService musicReviewService;
+    private final SpotifyService spotifyService;
     
+    // 사용자별 일일 새로고침 횟수 추적 (메모리 캐시)
+    private final Map<String, Integer> dailyRefreshCount = new ConcurrentHashMap<>();
+    private final Map<String, String> lastRefreshDate = new ConcurrentHashMap<>();
+    private final int MAX_DAILY_REFRESH = 10;
+    
+    /**
+     * Dashboard용 사용자 맞춤 추천 (Spotify 기반)
+     */
+    @GetMapping("/user/{userId}")
+    public ResponseEntity<?> getUserRecommendations(@PathVariable Long userId) {
+        try {
+            // 새로고침 제한 확인
+            String userKey = userId.toString();
+            String today = LocalDate.now().toString();
+            
+            // 날짜가 바뀌면 카운트 리셋
+            if (!today.equals(lastRefreshDate.get(userKey))) {
+                dailyRefreshCount.put(userKey, 0);
+                lastRefreshDate.put(userKey, today);
+            }
+            
+            int currentCount = dailyRefreshCount.getOrDefault(userKey, 0);
+            
+            // 일일 제한 확인
+            if (currentCount >= MAX_DAILY_REFRESH) {
+                return ResponseEntity.ok(Map.of(
+                    "error", "DAILY_LIMIT_EXCEEDED",
+                    "message", "오늘 새로고침 횟수를 모두 사용했습니다. (10회 제한)",
+                    "remainingRefresh", 0,
+                    "maxRefresh", MAX_DAILY_REFRESH
+                ));
+            }
+            
+            // 새로고침 카운트 증가
+            dailyRefreshCount.put(userKey, currentCount + 1);
+            
+            List<Map<String, Object>> recommendations = generateSpotifyBasedRecommendations(userId);
+            
+            // 기존 호환성을 위해 추천 리스트만 반환 (새로고침 정보는 헤더로)
+            return ResponseEntity.ok()
+                .header("X-Refresh-Used", String.valueOf(currentCount + 1))
+                .header("X-Refresh-Remaining", String.valueOf(MAX_DAILY_REFRESH - (currentCount + 1)))
+                .header("X-Refresh-Max", String.valueOf(MAX_DAILY_REFRESH))
+                .header("X-Refresh-Reset-Date", today)
+                .body(recommendations);
+        } catch (Exception e) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
+    }
+
+    private List<Map<String, Object>> generateSpotifyBasedRecommendations(Long userId) {
+        List<Map<String, Object>> recommendations = new ArrayList<>();
+        Random random = new Random();
+        
+        try {
+            // 1. 사용자 프로필 가져오기
+            ProfileDto profile = userProfileService.getOrInit(userId);
+            
+            // 2. 사용자 리뷰에서 높은 평점 아티스트/장르 추출
+            List<String> reviewBasedArtists = getArtistsFromUserReviews(userId);
+            List<String> reviewBasedGenres = getGenresFromUserReviews(userId);
+            
+            // 3. 프로필과 리뷰 데이터 결합
+            List<String> allArtists = new ArrayList<>();
+            List<String> allGenres = new ArrayList<>();
+            
+            // 프로필 선호 아티스트 추가
+            List<Map<String, Object>> favoriteArtists = profile.getFavoriteArtists();
+            favoriteArtists.forEach(artist -> allArtists.add((String) artist.get("name")));
+            
+            // 리뷰 기반 아티스트 추가
+            allArtists.addAll(reviewBasedArtists);
+            
+            // 프로필 선호 장르 추가
+            List<Map<String, Object>> favoriteGenres = profile.getFavoriteGenres();
+            favoriteGenres.forEach(genre -> allGenres.add((String) genre.get("name")));
+            
+            // 리뷰 기반 장르 추가
+            allGenres.addAll(reviewBasedGenres);
+            
+            // 4. 랜덤하게 섞어서 다양성 확보
+            Collections.shuffle(allArtists, random);
+            Collections.shuffle(allGenres, random);
+            
+            // 5. 아티스트 기반 추천 (최대 2곡)
+            for (int i = 0; i < Math.min(2, allArtists.size()) && recommendations.size() < 4; i++) {
+                String artistName = allArtists.get(i);
+                try {
+                    List<TrackDto> tracks = spotifyService.searchTracks(artistName, 5); // 더 많이 검색
+                    if (!tracks.isEmpty()) {
+                        // 랜덤하게 선택
+                        TrackDto selectedTrack = tracks.get(random.nextInt(tracks.size()));
+                        String source = reviewBasedArtists.contains(artistName) ? "리뷰 기반" : "선호 아티스트";
+                        recommendations.add(createRecommendationMap(selectedTrack, source));
+                    }
+                } catch (Exception e) {
+                    // 개별 검색 실패는 무시
+                }
+            }
+            
+            // 6. 장르 기반 추천 (나머지 채우기)
+            for (int i = 0; i < allGenres.size() && recommendations.size() < 4; i++) {
+                String genreName = allGenres.get(i);
+                try {
+                    List<TrackDto> tracks = spotifyService.searchTracks(genreName, 5); // 더 많이 검색
+                    if (!tracks.isEmpty()) {
+                        // 랜덤하게 선택
+                        TrackDto selectedTrack = tracks.get(random.nextInt(tracks.size()));
+                        String source = reviewBasedGenres.contains(genreName) ? "리뷰 기반" : "선호 장르";
+                        recommendations.add(createRecommendationMap(selectedTrack, source));
+                    }
+                } catch (Exception e) {
+                    // 개별 검색 실패는 무시
+                }
+            }
+            
+            // 7. 부족하면 인기곡으로 채우기
+            if (recommendations.size() < 4) {
+                try {
+                    List<String> fallbackGenres = List.of("pop", "rock", "indie", "electronic", "hip-hop");
+                    String randomGenre = fallbackGenres.get(random.nextInt(fallbackGenres.size()));
+                    List<TrackDto> tracks = spotifyService.searchTracks(randomGenre, 10);
+                    
+                    while (recommendations.size() < 4 && !tracks.isEmpty()) {
+                        TrackDto randomTrack = tracks.get(random.nextInt(tracks.size()));
+                        recommendations.add(createRecommendationMap(randomTrack, "인기곡"));
+                        tracks.remove(randomTrack); // 중복 방지
+                    }
+                } catch (Exception e) {
+                    // 기본 검색도 실패하면 빈 리스트 반환
+                }
+            }
+            
+        } catch (Exception e) {
+            // 전체 실패 시 빈 리스트 반환
+        }
+        
+        return recommendations;
+    }
+    
+    private Map<String, Object> createRecommendationMap(TrackDto track, String recommendationType) {
+        return Map.of(
+                "id", track.getId(),
+                "title", track.getName(),
+                "artist", track.getArtists().isEmpty() ? "Unknown Artist" : track.getArtists().get(0).getName(),
+                "image", track.getAlbum() != null && !track.getAlbum().getImages().isEmpty() 
+                    ? track.getAlbum().getImages().get(0).getUrl() 
+                    : "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop",
+                "genre", recommendationType,
+                "score", 85 + new Random().nextInt(15)
+        );
+    }
+    
+    /**
+     * 사용자 리뷰에서 높은 평점(4점 이상) 아티스트 추출
+     */
+    private List<String> getArtistsFromUserReviews(Long userId) {
+        try {
+            // 사용자가 작성한 리뷰 + 도움이 됨으로 표시한 리뷰에서 아티스트 추출
+            List<MusicReview> relevantReviews = musicReviewService.getReviewsForRecommendations(userId, 4);
+            return relevantReviews.stream()
+                .map(review -> review.getMusicItem().getArtistName())
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(5) // 최대 5개
+                .collect(Collectors.toList());
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * 사용자 리뷰에서 높은 평점(4점 이상) 장르 추출
+     */
+    private List<String> getGenresFromUserReviews(Long userId) {
+        try {
+            // 사용자가 작성한 리뷰 + 도움이 됨으로 표시한 리뷰에서 장르 추출
+            List<MusicReview> relevantReviews = musicReviewService.getReviewsForRecommendations(userId, 4);
+            return relevantReviews.stream()
+                .map(review -> review.getMusicItem().getGenre())
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(5) // 최대 5개
+                .collect(Collectors.toList());
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
     /**
      * 개인화된 음악 추천 조회
      */

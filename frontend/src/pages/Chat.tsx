@@ -5,6 +5,7 @@ import { Send, Paperclip, Smile, User, Loader2, Music, ArrowLeft, CheckCheck } f
 import { toast } from 'react-hot-toast';
 import api from '../api/client';
 import { useSocket } from '../context/SocketContext';
+import { validateInput, validateReviewText } from '../utils/security';
 
 /* ===================== 타입 ===================== */
 type ChatRoom = {
@@ -231,15 +232,23 @@ const Chat: React.FC = () => {
         const text = input.trim();
         if (!text || !activeRoomId || !me) return;
 
+        // 마지막 보안 검증
+        const validation = validateReviewText(text);
+        if (!validation.isValid) {
+            toast.error(validation.error || '메시지에 허용되지 않는 내용이 포함되어 있습니다');
+            return;
+        }
+
+        const sanitizedText = validation.sanitized;
         const rid = normalizeRoomId(activeRoomId);
 
-        // UI에 먼저 낙관적 반영
+        // UI에 먼저 낙관적 반영 (정리된 텍스트 사용)
         const localMsg: ChatMessage = {
             id: `${Date.now()}`,
             roomId: rid,
             senderId: me.id,
             senderName: me.name ?? '나',
-            content: text,
+            content: sanitizedText,
             type: 'TEXT',
             createdAt: new Date().toISOString(),
         };
@@ -250,15 +259,15 @@ const Chat: React.FC = () => {
             setInput('');
             setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 10);
 
-            // 1) 소켓 우선
+            // 1) 소켓 우선 (정리된 텍스트 전송)
             if (isSocketReady && socket?.sendChatMessage) {
-                await socket.sendChatMessage(rid, text);
+                await socket.sendChatMessage(rid, sanitizedText);
                 return;
             }
 
             // 2) REST fallback (백엔드가 @RequestParam senderId, content 받음)
             await api.post(`/api/chat/rooms/${rid}/messages`, null, {
-                params: { senderId: me.id, content: text },
+                params: { senderId: me.id, content: sanitizedText },
             });
         } catch {
             toast.error('메시지 전송 실패');
@@ -396,7 +405,13 @@ const Chat: React.FC = () => {
                             ref={inputRef}
                             value={input}
                             onChange={(e) => {
-                                setInput(e.target.value);
+                                const rawValue = e.target.value;
+                                const validation = validateReviewText(rawValue);
+                                if (!validation.isValid) {
+                                    toast.error(validation.error || '메시지에 허용되지 않는 내용이 포함되어 있습니다');
+                                    return;
+                                }
+                                setInput(validation.sanitized);
                                 setIsTyping(true);
                             }}
                             onKeyDown={(e) => {

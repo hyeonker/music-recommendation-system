@@ -1,0 +1,220 @@
+import React, { useState } from 'react';
+import { Heart, Calendar } from 'lucide-react';
+import ReviewActions from './ReviewActions';
+import ReviewForm from './ReviewForm';
+
+interface Review {
+  id: number;
+  userId: number;
+  userNickname?: string;
+  musicItem: {
+    id: number;
+    name: string;
+    artistName: string;
+    albumName?: string;
+    imageUrl?: string;
+    itemType: string;
+  };
+  rating: number;
+  ratingEmoji: string;
+  reviewText?: string;
+  tags: string[];
+  helpfulCount: number;
+  createdAt: string;
+}
+
+interface ReviewCardProps {
+  review: Review;
+  currentUserId?: number;
+  onUpdate?: () => void;
+  onHelpful?: (reviewId: number) => void;
+}
+
+const ReviewCard: React.FC<ReviewCardProps> = ({ 
+  review, 
+  currentUserId, 
+  onUpdate, 
+  onHelpful 
+}) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const isOwnReview = currentUserId === review.userId;
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+  };
+
+  const handleSaveEdit = () => {
+    setIsEditing(false);
+    onUpdate?.();
+  };
+
+  const handleDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+
+    try {
+      const response = await fetch(`/api/reviews/${review.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        onUpdate?.();
+      } else {
+        alert('리뷰 삭제에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('리뷰 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleHelpful = () => {
+    onHelpful?.(review.id);
+  };
+
+  if (isEditing) {
+    return (
+      <div className="bg-white/10 backdrop-blur-lg rounded-lg shadow-sm border border-white/20 p-6">
+        <ReviewForm
+          mode="edit"
+          initialData={{
+            reviewId: review.id,
+            externalId: '',
+            itemType: review.musicItem.itemType as any,
+            musicName: review.musicItem.name,
+            artistName: review.musicItem.artistName,
+            albumName: review.musicItem.albumName || '',
+            imageUrl: review.musicItem.imageUrl || '',
+            rating: review.rating,
+            reviewText: review.reviewText || '',
+            tags: review.tags
+          }}
+          onSuccess={handleSaveEdit}
+          onCancel={handleCancelEdit}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/10 backdrop-blur-lg rounded-lg shadow-sm border border-white/20 p-6 hover:shadow-md transition-shadow">
+      <div className="flex items-start gap-4">
+        {/* 음악 커버 */}
+        <div className="w-16 h-16 bg-gray-200 rounded-lg flex-shrink-0 overflow-hidden">
+          {review.musicItem.imageUrl ? (
+            <img
+              src={review.musicItem.imageUrl}
+              alt={review.musicItem.name}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-400">
+              🎵
+            </div>
+          )}
+        </div>
+
+        {/* 리뷰 내용 */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <h3 className="font-medium text-white truncate">
+                {review.musicItem.name}
+              </h3>
+              <p className="text-sm text-blue-200">
+                {review.musicItem.artistName}
+                {review.musicItem.albumName && (
+                  <span className="text-blue-300"> • {review.musicItem.albumName}</span>
+                )}
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-2 ml-4">
+              <span className="text-2xl">{review.ratingEmoji}</span>
+              <span className="text-sm font-medium text-white">
+                {review.rating}/5
+              </span>
+              <ReviewActions
+                reviewId={review.id}
+                isOwnReview={isOwnReview}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onReport={onUpdate}
+              />
+            </div>
+          </div>
+
+          {/* 리뷰 텍스트 */}
+          {review.reviewText && (
+            <p className="mt-3 text-white text-sm leading-relaxed">
+              {review.reviewText}
+            </p>
+          )}
+
+          {/* 태그 */}
+          {review.tags.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1">
+              {review.tags.map((tag, index) => (
+                <span
+                  key={index}
+                  className="inline-block px-2 py-1 text-xs bg-blue-500/20 text-blue-200 rounded-full"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* 하단 정보 */}
+          <div className="mt-4 flex items-center justify-between text-sm text-blue-200">
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1">
+                <Calendar className="w-4 h-4" />
+                {formatDate(review.createdAt)}
+              </span>
+              {review.userNickname && (
+                <span>by {review.userNickname}</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {!isOwnReview && (
+                <button
+                  onClick={handleHelpful}
+                  className="flex items-center gap-1 px-3 py-1 text-sm rounded-full bg-white/20 hover:bg-white/30 transition-colors text-white"
+                >
+                  <Heart className="w-4 h-4" />
+                  도움이 됨 ({review.helpfulCount})
+                </button>
+              )}
+              {deleting && (
+                <span className="text-xs text-red-500">삭제 중...</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ReviewCard;

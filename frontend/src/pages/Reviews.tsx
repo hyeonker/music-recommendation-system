@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { reviewApi } from '../api/client';
 import ReviewForm from '../components/ReviewForm';
+import ReviewCard from '../components/ReviewCard';
 
 interface Review {
   id: number;
@@ -237,75 +238,13 @@ const Reviews: React.FC = () => {
   };
 
   const renderReview = (review: Review) => (
-    <div key={review.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 shadow-xl">
-      <div className="flex items-start space-x-4">
-        {review.musicItem.imageUrl && (
-          <img
-            src={review.musicItem.imageUrl}
-            alt={review.musicItem.name}
-            className="w-16 h-16 rounded-xl object-cover shadow-md"
-          />
-        )}
-        <div className="flex-1">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="font-bold text-lg text-white">{review.musicItem.name}</h3>
-              <p className="text-blue-200">{review.musicItem.artistName}</p>
-              {review.musicItem.albumName && (
-                <p className="text-sm text-blue-300/80">{review.musicItem.albumName}</p>
-              )}
-            </div>
-            <div className="text-right">
-              {renderRating(review.rating)}
-              <span className="text-2xl ml-2">{review.ratingEmoji}</span>
-            </div>
-          </div>
-          
-          {review.reviewText && (
-            <p className="text-white/90 mb-4 leading-relaxed">{review.reviewText}</p>
-          )}
-          
-          {review.tags && review.tags.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-4">
-              {review.tags.map(tag => (
-                <span
-                  key={tag}
-                  className="px-3 py-1 bg-gradient-to-r from-blue-500/30 to-purple-500/30 text-blue-200 rounded-full text-sm border border-blue-400/20"
-                >
-                  #{tag}
-                </span>
-              ))}
-            </div>
-          )}
-          
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center space-x-2">
-              <span className="text-blue-200">{new Date(review.createdAt).toLocaleDateString('ko-KR')}</span>
-              {review.userNickname && (
-                <>
-                  <span className="text-blue-300">•</span>
-                  <span className="text-blue-300">{review.userNickname}</span>
-                </>
-              )}
-            </div>
-            {currentUserId !== review.userId ? (
-              <button
-                onClick={() => handleHelpful(review.id)}
-                className="flex items-center space-x-1 text-blue-200 hover:text-white transition-colors bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full"
-              >
-                <span>👍</span>
-                <span>도움이 됨 {review.helpfulCount}</span>
-              </button>
-            ) : (
-              <div className="flex items-center space-x-1 text-gray-400 px-3 py-1 rounded-full">
-                <span>👍</span>
-                <span>도움이 됨 {review.helpfulCount} (내 리뷰)</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+    <ReviewCard
+      key={review.id}
+      review={review}
+      currentUserId={currentUserId || undefined}
+      onUpdate={loadReviews}
+      onHelpful={handleHelpful}
+    />
   );
 
   const renderBadge = (badge: Badge) => (

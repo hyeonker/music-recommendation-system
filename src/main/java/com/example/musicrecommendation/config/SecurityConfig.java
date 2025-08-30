@@ -48,6 +48,7 @@ public class SecurityConfig {
                                 "/api/user-profile/**",       // 프로필 API 허용
                                 "/api/users/**",              // 사용자 API 허용
                                 "/api/spotify/**",            // Spotify API 허용
+                                "/api/recommendations/**",    // 추천 API 허용
                                 "/api/reviews/recent",        // 공개 리뷰 목록 조회 허용
                                 "/api/reviews/helpful",       // 도움이 되는 리뷰 목록 허용
                                 "/api/reviews/high-rated",    // 높은 평점 리뷰 목록 허용
@@ -71,7 +72,9 @@ public class SecurityConfig {
                         new AntPathRequestMatcher("/api/users/**"),
                         new AntPathRequestMatcher("/api/spotify/**"),
                         new AntPathRequestMatcher("/api/reviews/**"),
-                        new AntPathRequestMatcher("/api/badges/**")
+                        new AntPathRequestMatcher("/api/badges/**"),
+                        new AntPathRequestMatcher("/api/recommendations/**"),
+                        new AntPathRequestMatcher("/api/admin/**")
                 ))
 
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))

@@ -2,6 +2,7 @@ package com.example.musicrecommendation.web.dto;
 
 import com.example.musicrecommendation.domain.AuthProvider;
 import com.example.musicrecommendation.domain.User;
+import com.example.musicrecommendation.domain.UserStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
@@ -34,6 +35,9 @@ public class UserResponse {
     @Schema(description = "계정 수정일시")
     private LocalDateTime updatedAt;
 
+    @Schema(description = "사용자 상태", example = "ACTIVE")
+    private UserStatus status;
+
     /**
      * 기본 생성자
      */
@@ -43,7 +47,7 @@ public class UserResponse {
      * 모든 필드를 받는 생성자
      */
     public UserResponse(Long id, String email, String name, String profileImageUrl,
-                        AuthProvider provider, LocalDateTime createdAt, LocalDateTime updatedAt) {
+                        AuthProvider provider, LocalDateTime createdAt, LocalDateTime updatedAt, UserStatus status) {
         this.id = id;
         this.email = email;
         this.name = name;
@@ -51,6 +55,7 @@ public class UserResponse {
         this.provider = provider;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.status = status;
     }
 
     /**
@@ -67,7 +72,8 @@ public class UserResponse {
                 user.getProfileImageUrl(),
                 user.getProvider(),
                 user.getCreatedAt(),
-                user.getUpdatedAt()
+                user.getUpdatedAt(),
+                user.getStatus()
         );
     }
 
@@ -126,5 +132,13 @@ public class UserResponse {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public UserStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(UserStatus status) {
+        this.status = status;
     }
 }
