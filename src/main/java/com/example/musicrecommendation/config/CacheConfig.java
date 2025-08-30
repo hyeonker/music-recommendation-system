@@ -18,6 +18,7 @@ public class CacheConfig {
         CaffeineCacheManager cm = new CaffeineCacheManager(
                 "artistSearch",
                 "trackSearch",       // 트랙 검색 캐시
+                "artistTrackSearch", // 아티스트별 트랙 검색 캐시
                 "reviews",           // 리뷰 캐시
                 "user-badges",       // 사용자 배지 캐시
                 "music-items",       // 음악 아이템 캐시

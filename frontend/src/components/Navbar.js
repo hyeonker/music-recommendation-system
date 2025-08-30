@@ -3,9 +3,11 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
     Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star
 } from 'lucide-react';
+import { useUser } from '../context/UserContext';
 
 const Navbar = ({ darkMode, toggleDarkMode }) => {
     const location = useLocation();
+    const { user } = useUser();
 
     const navItems = [
         { path: '/dashboard', icon: Home,    label: '홈' },
@@ -78,7 +80,7 @@ const Navbar = ({ darkMode, toggleDarkMode }) => {
                             <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-pink-400 flex items-center justify-center shadow-md">
                                 <Heart className="h-4 w-4 text-white" />
                             </div>
-                            <span className="text-white/90 font-medium">뮤직러버</span>
+                            <span className="text-white/90 font-medium">{user.name}</span>
                         </div>
                     </div>
                 </div>

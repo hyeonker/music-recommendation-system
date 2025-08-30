@@ -6,89 +6,134 @@ interface ReviewFormProps {
   onSubmit: (reviewData: any) => void;
 }
 
-// 검색 관련성 점수 계산 함수
-// Legacy function - replaced by calculateEnhancedRelevance
-const calculateRelevance = (title: string, query: string): number => {
-  const titleLower = title.toLowerCase();
-  const queryLower = query.toLowerCase();
-  
-  if (titleLower === queryLower) return 100;
-  if (titleLower.startsWith(queryLower)) return 80;
-  if (titleLower.includes(queryLower)) return 60;
-  
-  const queryWords = queryLower.split(/\s+/);
-  const allWordsFound = queryWords.every(word => titleLower.includes(word));
-  if (allWordsFound) return 40;
-  
-  const someWordsFound = queryWords.some(word => titleLower.includes(word));
-  if (someWordsFound) return 20;
-  
-  return 0;
-};
-
 const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
-  const [musicSearch, setMusicSearch] = useState('');
+  // 2단계 검색 상태들
+  const [artistSearch, setArtistSearch] = useState('');
+  const [selectedArtist, setSelectedArtist] = useState<any>(null);
+  const [songSearch, setSongSearch] = useState('');
   const [selectedMusic, setSelectedMusic] = useState<any>(null);
+  
+  // 기본 상태들
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [tags, setTags] = useState('');
   const [isPublic, setIsPublic] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  
+  // 검색 관련 상태들
+  const [isSearchingArtists, setIsSearchingArtists] = useState(false);
+  const [isSearchingSongs, setIsSearchingSongs] = useState(false);
+  const [artistResults, setArtistResults] = useState<any[]>([]);
+  const [songResults, setSongResults] = useState<any[]>([]);
 
-  const searchMusic = async (query: string) => {
+  // 아티스트 검색 함수
+  const searchArtists = async (query: string) => {
     if (!query.trim()) {
-      setSearchResults([]);
-      setSelectedMusic(null); // 검색어가 비어있으면 선택된 음악도 초기화
+      setArtistResults([]);
       return;
     }
     
     try {
-      setIsSearching(true);
+      setIsSearchingArtists(true);
       const response = await fetch(`http://localhost:9090/api/spotify/search/artists?q=${encodeURIComponent(query)}&limit=10`);
       const data = await response.json();
       
-      // 아티스트와 트랙을 모두 검색
-      const trackResponse = await fetch(`http://localhost:9090/api/spotify/search/tracks?q=${encodeURIComponent(query)}&limit=15`);
-      const trackData = await trackResponse.json();
+      console.log('아티스트 검색 응답:', data);
       
-      // 아티스트를 ARTIST 타입으로, 트랙을 TRACK 타입으로 변환
-      const artists = (data.artists?.items || data.items || []).map((artist: any) => ({
+      // 백엔드에서 직접 ArtistDto 배열을 반환
+      const artists = (Array.isArray(data) ? data : []).map((artist: any) => ({
         ...artist,
-        itemType: 'ARTIST',
         displayName: artist.name,
-        displaySubtitle: `팔로워 ${artist.followers?.total?.toLocaleString() || 0}명`,
-        imageUrl: artist.images?.[0]?.url
+        displaySubtitle: `팔로워 ${artist.followers?.toLocaleString() || 0}명`,
+        imageUrl: artist.image
       }));
       
-      // 백엔드에서 직접 TrackDto 배열을 반환하므로 trackData 자체가 배열입니다
-      const tracks = (Array.isArray(trackData) ? trackData : []).map((track: any) => ({
-        ...track,
-        itemType: 'TRACK',
-        displayName: track.name,
-        displaySubtitle: track.artists?.map((a: any) => a.name).join(', '),
-        imageUrl: track.image || track.album?.images?.[0]?.url
-      }));
-      
-      // 트랙을 먼저, 그 다음 아티스트를 표시 (트랙이 더 구체적이므로)
-      // 관련성이 높은 순서로 정렬
-      const sortedTracks = tracks.sort((a: any, b: any) => {
-        const aRelevance = calculateRelevance(a.displayName, query);
-        const bRelevance = calculateRelevance(b.displayName, query);
-        return bRelevance - aRelevance;
-      });
-      
-      const sortedArtists = artists.sort((a: any, b: any) => {
-        const aRelevance = calculateRelevance(a.displayName, query);
-        const bRelevance = calculateRelevance(b.displayName, query);
-        return bRelevance - aRelevance;
-      });
-      
-      setSearchResults([...sortedTracks, ...sortedArtists]);
+      console.log('매핑된 아티스트:', artists);
+      setArtistResults(artists);
     } catch (error) {
-      console.error('음악 검색 실패:', error);
+      console.error('아티스트 검색 실패:', error);
     } finally {
-      setIsSearching(false);
+      setIsSearchingArtists(false);
+    }
+  };
+
+  // 선택된 아티스트의 곡 검색 함수
+  const searchArtistSongs = async (query: string) => {
+    if (!selectedArtist) {
+      setSongResults([]);
+      return;
+    }
+    
+    try {
+      setIsSearchingSongs(true);
+      
+      let allTracks: any[] = [];
+      
+      // 1. 선택된 아티스트의 인기곡 가져오기
+      try {
+        const topTracksResponse = await fetch(`http://localhost:9090/api/spotify/artist/${selectedArtist.id}/top-tracks?limit=20`);
+        const topTracks = await topTracksResponse.json();
+        
+        const processedTopTracks = topTracks.map((track: any) => ({
+          ...track,
+          displayName: track.name,
+          displaySubtitle: `${track.artists?.map((a: any) => a.name).join(', ')} • 인기곡`,
+          imageUrl: track.image,
+          isTopTrack: true
+        }));
+        
+        allTracks.push(...processedTopTracks);
+      } catch (error) {
+        console.error('인기곡 조회 실패:', error);
+      }
+      
+      // 2. 검색어가 있으면 아티스트별 곡 검색 사용
+      if (query.trim()) {
+        try {
+          const searchResponse = await fetch(`http://localhost:9090/api/spotify/search/artist-tracks?artist=${encodeURIComponent(selectedArtist.name)}&q=${encodeURIComponent(query)}&limit=20`);
+          const searchTracks = await searchResponse.json();
+          
+          const processedSearchTracks = (Array.isArray(searchTracks) ? searchTracks : [])
+            .filter((track: any) => 
+              // 중복 제거: 이미 인기곡에 있는 곡은 제외
+              !allTracks.some(existing => existing.id === track.id)
+            )
+            .map((track: any) => ({
+              ...track,
+              displayName: track.name,
+              displaySubtitle: `${track.artists?.map((a: any) => a.name).join(', ')} • 검색결과`,
+              imageUrl: track.image,
+              isTopTrack: false
+            }));
+          
+          allTracks.push(...processedSearchTracks);
+        } catch (error) {
+          console.error('아티스트 곡 검색 실패:', error);
+        }
+      }
+      
+      // 3. 검색어로 필터링 (검색어가 있는 경우) - 구두점 차이 허용
+      let filteredTracks = allTracks;
+      if (query.trim()) {
+        const normalizedQuery = query.toLowerCase().replace(/[,\s]+/g, ' ').trim();
+        filteredTracks = allTracks.filter((track: any) => {
+          const normalizedTrackName = track.name.toLowerCase().replace(/[,\s]+/g, ' ').trim();
+          return normalizedTrackName.includes(normalizedQuery) || normalizedQuery.includes(normalizedTrackName);
+        });
+      }
+      
+      // 4. 인기곡을 먼저 표시하고 나머지는 뒤에
+      filteredTracks.sort((a: any, b: any) => {
+        if (a.isTopTrack && !b.isTopTrack) return -1;
+        if (!a.isTopTrack && b.isTopTrack) return 1;
+        return 0;
+      });
+      
+      console.log('최종 곡 검색 결과:', filteredTracks);
+      setSongResults(filteredTracks);
+    } catch (error) {
+      console.error('곡 검색 실패:', error);
+    } finally {
+      setIsSearchingSongs(false);
     }
   };
 
@@ -158,46 +203,48 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* 음악 검색 */}
+          {/* 1단계: 아티스트 검색 */}
           <div>
             <label className="block text-blue-200 text-sm font-medium mb-2">
-              음악 검색 *
+              1단계: 아티스트 검색 *
             </label>
             <div className="relative">
               <input
                 type="text"
-                value={musicSearch}
+                value={artistSearch}
                 onChange={(e) => {
                   const value = e.target.value;
-                  setMusicSearch(value);
+                  setArtistSearch(value);
                   
-                  // 검색어가 변경되면 이전 선택을 초기화
-                  if (selectedMusic && value !== selectedMusic.displayName && value !== selectedMusic.name) {
+                  // 아티스트 검색어가 변경되면 선택된 아티스트와 곡 초기화
+                  if (value !== selectedArtist?.name) {
+                    setSelectedArtist(null);
                     setSelectedMusic(null);
-                    console.log('검색어 변경으로 selectedMusic 초기화:', selectedMusic.displayName, '->', value);
+                    setSongSearch('');
+                    setSongResults([]);
                   }
                   
-                  searchMusic(value);
+                  searchArtists(value);
                 }}
-                placeholder="아티스트나 곡명을 입력하세요..."
+                placeholder="아티스트명을 입력하세요..."
                 className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               
-              {/* 검색 결과 */}
-              {(searchResults.length > 0 || isSearching) && (
+              {/* 아티스트 검색 결과 */}
+              {(artistResults.length > 0 || isSearchingArtists) && (
                 <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-200 z-[200] max-h-96 overflow-hidden flex flex-col">
                   <div className="flex justify-between items-center p-3 border-b bg-gradient-to-r from-blue-50 to-purple-50">
                     <div>
-                      <h3 className="font-semibold text-gray-800 text-sm">검색 결과</h3>
+                      <h3 className="font-semibold text-gray-800 text-sm">아티스트 검색 결과</h3>
                       <p className="text-xs text-gray-600">
-                        {isSearching ? '검색 중...' : `${searchResults.length}개 결과`}
+                        {isSearchingArtists ? '검색 중...' : `${artistResults.length}개 아티스트`}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => {
-                        setSearchResults([]);
-                        setMusicSearch('');
+                        setArtistResults([]);
+                        setArtistSearch('');
                       }}
                       className="text-gray-400 hover:text-gray-600 p-1 rounded-full"
                     >
@@ -206,93 +253,78 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
                   </div>
 
                   <div className="flex-1 overflow-y-auto">
-                    {isSearching && (
-                      <div className="p-4 text-center text-sm text-gray-500">검색 중...</div>
+                    {isSearchingArtists && (
+                      <div className="p-4 text-center text-sm text-gray-500">아티스트 검색 중...</div>
                     )}
 
-                    {!isSearching && searchResults.length === 0 && musicSearch.trim() && (
-                      <div className="p-4 text-center text-sm text-gray-500">결과가 없습니다</div>
+                    {!isSearchingArtists && artistResults.length === 0 && artistSearch.trim() && (
+                      <div className="p-4 text-center text-sm text-gray-500">아티스트를 찾을 수 없습니다</div>
                     )}
 
-                    {!isSearching &&
-                      searchResults.length > 0 &&
-                      searchResults.map((item) => (
-                        <div
-                          key={item.id}
-                          onClick={() => {
-                            console.log('음악 선택:', item.displayName, 'ID:', item.id);
-                            setSelectedMusic(item);
-                            setMusicSearch(item.displayName);
-                            setSearchResults([]);
-                          }}
-                          className="flex items-center p-3 hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
-                        >
-                          <img
-                            src={item.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(item.displayName)}&backgroundColor=random`}
-                            alt={item.displayName}
-                            className="w-12 h-12 rounded-full object-cover mr-3 shadow-md"
-                            onError={(e) => {
-                              const t = e.currentTarget as HTMLImageElement;
-                              t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(item.displayName)}&backgroundColor=random`;
-                            }}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-gray-900 text-sm flex items-center">
-                              {item.displayName}
-                              <span className={`ml-2 px-2 py-1 text-xs rounded-full ${
-                                item.itemType === 'ARTIST' 
-                                  ? 'bg-purple-100 text-purple-800' 
-                                  : 'bg-green-100 text-green-800'
-                              }`}>
-                                {item.itemType === 'ARTIST' ? '아티스트' : '곡'}
-                              </span>
-                            </div>
-                            <div className="text-xs text-gray-600">
-                              {item.displaySubtitle}
-                            </div>
+                    {artistResults.map((artist) => (
+                      <div
+                        key={artist.id}
+                        onClick={() => {
+                          console.log('아티스트 선택:', artist.displayName);
+                          setSelectedArtist(artist);
+                          setArtistSearch(artist.displayName);
+                          setArtistResults([]);
+                          setSongSearch('');
+                          setSelectedMusic(null);
+                          // 아티스트 선택 시 자동으로 인기곡 로드
+                          searchArtistSongs('');
+                        }}
+                        className="flex items-center p-3 hover:bg-gradient-to-r hover:from-purple-50 hover:to-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                      >
+                        <img
+                          src={artist.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(artist.displayName)}&backgroundColor=random`}
+                          alt={artist.displayName}
+                          className="w-12 h-12 rounded-full object-cover mr-3 shadow-md"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-gray-900 text-sm flex items-center">
+                            {artist.displayName}
+                            <span className="ml-2 px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
+                              아티스트
+                            </span>
                           </div>
+                          <div className="text-xs text-gray-600">{artist.displaySubtitle}</div>
                         </div>
-                      ))}
-                  </div>
-
-                  <div className="p-2 bg-gray-50">
-                    <p className="text-xs text-gray-500 text-center">
-                      클릭하여 선택하거나 ESC로 닫기
-                    </p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
             </div>
             
-            {selectedMusic && (
+            {/* 선택된 아티스트 표시 */}
+            {selectedArtist && (
               <div className="mt-3 p-4 bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 flex items-center space-x-3">
                 <img
-                  src={selectedMusic.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`}
-                  alt={selectedMusic.displayName}
+                  src={selectedArtist.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedArtist.displayName)}&backgroundColor=random`}
+                  alt={selectedArtist.displayName}
                   className="w-12 h-12 rounded-full object-cover shadow-md"
-                  onError={(e) => {
-                    const t = e.currentTarget as HTMLImageElement;
-                    t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`;
-                  }}
                 />
                 <div className="flex-1">
                   <div className="font-medium text-white flex items-center">
-                    {selectedMusic.displayName}
-                    <span className={`ml-2 px-2 py-1 text-xs rounded-full ${
-                      selectedMusic.itemType === 'ARTIST' 
-                        ? 'bg-purple-500/30 text-purple-200' 
-                        : 'bg-green-500/30 text-green-200'
-                    }`}>
-                      {selectedMusic.itemType === 'ARTIST' ? '아티스트' : '곡'}
+                    {selectedArtist.displayName}
+                    <span className="ml-2 px-2 py-1 text-xs rounded-full bg-purple-500/30 text-purple-200">
+                      선택된 아티스트
                     </span>
                   </div>
                   <div className="text-sm text-blue-200">
-                    {selectedMusic.displaySubtitle}
+                    {selectedArtist.displaySubtitle}
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedMusic(null)}
+                  onClick={() => {
+                    setSelectedArtist(null);
+                    setArtistSearch('');
+                    setSelectedMusic(null);
+                    setSongSearch('');
+                    setSongResults([]);
+                  }}
                   className="text-red-400 hover:text-red-300 p-1 rounded-full hover:bg-white/10 transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -300,6 +332,131 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onClose, onSubmit }) => {
               </div>
             )}
           </div>
+
+          {/* 2단계: 곡 검색 (아티스트 선택 후에만 활성화) */}
+          {selectedArtist && (
+            <div>
+              <label className="block text-blue-200 text-sm font-medium mb-2">
+                2단계: 곡 검색 *
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={songSearch}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSongSearch(value);
+                    
+                    if (value !== selectedMusic?.name) {
+                      setSelectedMusic(null);
+                    }
+                    
+                    searchArtistSongs(value);
+                  }}
+                  placeholder={`${selectedArtist.displayName}의 곡을 검색하세요...`}
+                  className="w-full px-4 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                
+                {/* 곡 검색 결과 */}
+                {(songResults.length > 0 || isSearchingSongs) && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-2xl border border-gray-200 z-[200] max-h-96 overflow-hidden flex flex-col">
+                    <div className="flex justify-between items-center p-3 border-b bg-gradient-to-r from-green-50 to-blue-50">
+                      <div>
+                        <h3 className="font-semibold text-gray-800 text-sm">{selectedArtist.displayName}의 곡</h3>
+                        <p className="text-xs text-gray-600">
+                          {isSearchingSongs ? '검색 중...' : `${songResults.length}개 곡`}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSongResults([]);
+                          setSongSearch('');
+                        }}
+                        className="text-gray-400 hover:text-gray-600 p-1 rounded-full"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto">
+                      {isSearchingSongs && (
+                        <div className="p-4 text-center text-sm text-gray-500">곡 검색 중...</div>
+                      )}
+
+                      {!isSearchingSongs && songResults.length === 0 && songSearch.trim() && (
+                        <div className="p-4 text-center text-sm text-gray-500">해당 곡을 찾을 수 없습니다</div>
+                      )}
+
+                      {songResults.map((track) => (
+                        <div
+                          key={track.id}
+                          onClick={() => {
+                            console.log('곡 선택:', track.displayName);
+                            setSelectedMusic(track);
+                            setSongSearch(track.displayName);
+                            setSongResults([]);
+                          }}
+                          className="flex items-center p-3 hover:bg-gradient-to-r hover:from-green-50 hover:to-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                        >
+                          <img
+                            src={track.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(track.displayName)}&backgroundColor=random`}
+                            alt={track.displayName}
+                            className="w-12 h-12 rounded-full object-cover mr-3 shadow-md"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold text-gray-900 text-sm flex items-center">
+                              {track.displayName}
+                              <span className="ml-2 px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                                곡
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-600">{track.displaySubtitle}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 선택된 곡 표시 */}
+          {selectedMusic && (
+            <div className="mt-3 p-4 bg-white/10 backdrop-blur-lg rounded-lg border border-white/20 flex items-center space-x-3">
+              <img
+                src={selectedMusic.imageUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`}
+                alt={selectedMusic.displayName}
+                className="w-12 h-12 rounded-full object-cover shadow-md"
+                onError={(e) => {
+                  const t = e.currentTarget as HTMLImageElement;
+                  t.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedMusic.displayName)}&backgroundColor=random`;
+                }}
+              />
+              <div className="flex-1">
+                <div className="font-medium text-white flex items-center">
+                  {selectedMusic.displayName}
+                  <span className="ml-2 px-2 py-1 text-xs rounded-full bg-green-500/30 text-green-200">
+                    선택된 곡
+                  </span>
+                </div>
+                <div className="text-sm text-blue-200">
+                  {selectedMusic.displaySubtitle}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedMusic(null);
+                  setSongSearch('');
+                }}
+                className="text-red-400 hover:text-red-300 p-1 rounded-full hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          )}
 
           {/* 평점 */}
           <div>

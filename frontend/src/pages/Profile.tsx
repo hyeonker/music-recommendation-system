@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Save, Music, Search, X, Plus, Star, Heart, BarChart3 } from 'lucide-react';
 import api from '../api/client';
 import { toast } from 'react-hot-toast';
+import { useUser } from '../context/UserContext';
 import {
     fetchProfile as apiFetchProfile,
     saveProfile as apiSaveProfile,
@@ -96,6 +97,7 @@ const Profile: React.FC = () => {
     // ⭐ 로그인 사용자 ID 별도 관리
     const [userId, setUserId] = useState<number>(1);
     const [profile, setProfile] = useState<UserProfile>(normalizeProfile(null, userId));
+    const { setUser } = useUser();
 
     // 검색/저장/로딩 상태
     const [artistSearchQuery, setArtistSearchQuery] = useState('');
@@ -153,32 +155,54 @@ const Profile: React.FC = () => {
     ];
 
     const musicFestivals = [
+        // 한국 페스티벌
+        { id: 'pentaport', name: '인천 펜타포트 락페스티벌', location: '인천 송도', type: 'Rock/Multi-genre' },
+        { id: 'waterbomb', name: '워터밤', location: '서울', type: 'Hip-Hop/Electronic' },
+        { id: 'lets_rock', name: '렛츠락 페스티벌', location: '서울 난지한강공원', type: 'Rock' },
+        { id: 'busan_rock', name: '부산국제록페스티벌', location: '부산 삼락생태공원', type: 'Rock/Metal' },
+        { id: 'seoul_jazz', name: '서울재즈페스티벌', location: '서울 올림픽공원', type: 'Jazz' },
+        { id: 'edc_korea', name: 'EDC Korea', location: '과천 서울랜드', type: 'Electronic' },
+        { id: 'world_dj', name: '월드 DJ 페스티벌 (월디페)', location: '서울', type: 'Electronic' },
+        { id: 'beautiful_mint', name: '뷰티풀민트라이프', location: '서울 올림픽공원', type: 'Indie/Folk' },
+        { id: 'dmz_peace', name: 'DMZ 피스트레인 뮤직페스티벌', location: '철원', type: 'Multi-genre' },
+        { id: 'zandari', name: '잔다리 페스타', location: '서울', type: 'Indie' },
+        { id: 'kb_rapbeat', name: 'KB 랩비트 페스티벌', location: '서울', type: 'Hip-Hop' },
+        
+        // 미국 주요 페스티벌
         { id: 'coachella', name: 'Coachella', location: '미국 캘리포니아', type: 'Multi-genre' },
-        { id: 'glastonbury', name: 'Glastonbury', location: '영국', type: 'Rock/Pop' },
         { id: 'lollapalooza', name: 'Lollapalooza', location: '미국 시카고', type: 'Multi-genre' },
         { id: 'bonnaroo', name: 'Bonnaroo', location: '미국 테네시', type: 'Multi-genre' },
-        { id: 'burning_man', name: 'Burning Man', location: '미국 네바다', type: 'Electronic/Art' },
-        { id: 'tomorrowland', name: 'Tomorrowland', location: '벨기에', type: 'Electronic' },
+        { id: 'sxsw', name: 'SXSW', location: '미국 텍사스 오스틴', type: 'Multi-genre' },
         { id: 'ultra', name: 'Ultra Music Festival', location: '미국 마이애미', type: 'Electronic' },
-        { id: 'edc', name: 'Electric Daisy Carnival', location: '미국 라스베가스', type: 'Electronic' },
+        { id: 'edc_vegas', name: 'EDC Las Vegas', location: '미국 라스베가스', type: 'Electronic' },
+        { id: 'electric_forest', name: 'Electric Forest', location: '미국 미시간', type: 'Electronic' },
+        { id: 'burning_man', name: 'Burning Man', location: '미국 네바다', type: 'Electronic/Art' },
+        
+        // 영국 주요 페스티벌  
+        { id: 'glastonbury', name: 'Glastonbury', location: '영국 서머셋', type: 'Multi-genre' },
         { id: 'reading_leeds', name: 'Reading & Leeds', location: '영국', type: 'Rock/Alternative' },
-        { id: 'download', name: 'Download Festival', location: '영국', type: 'Rock/Metal' },
+        { id: 'download', name: 'Download Festival', location: '영국 도닝턴', type: 'Rock/Metal' },
+        { id: 'wireless', name: 'Wireless Festival', location: '영국 런던', type: 'Hip-Hop/R&B' },
+        { id: 'truck', name: 'Truck Festival', location: '영국 옥스퍼드셔', type: 'Indie/Alternative' },
+        { id: 'latitude', name: 'Latitude Festival', location: '영국 서퍽', type: 'Multi-genre' },
+        { id: 'creamfields', name: 'Creamfields', location: '영국 체셔', type: 'Electronic' },
+        { id: 'isle_of_wight', name: 'Isle of Wight Festival', location: '영국 와이트섬', type: 'Rock/Pop' },
+        
+        // 유럽 주요 페스티벌
+        { id: 'tomorrowland', name: 'Tomorrowland', location: '벨기에', type: 'Electronic' },
+        { id: 'primavera', name: 'Primavera Sound', location: '스페인 바르셀로나', type: 'Indie/Alternative' },
+        { id: 'sziget', name: 'Sziget Festival', location: '헝가리 부다페스트', type: 'Multi-genre' },
+        { id: 'roskilde', name: 'Roskilde Festival', location: '덴마크', type: 'Multi-genre' },
+        { id: 'exit', name: 'EXIT Festival', location: '세르비아 노비사드', type: 'Electronic/Rock' },
+        { id: 'rock_werchter', name: 'Rock Werchter', location: '벨기에', type: 'Rock/Pop' },
+        { id: 'pukkelpop', name: 'Pukkelpop', location: '벨기에', type: 'Alternative/Electronic' },
+        
+        // 일본/아시아 페스티벌
         { id: 'fuji_rock', name: '후지 락 페스티벌', location: '일본 니가타', type: 'Rock/Multi-genre' },
         { id: 'summer_sonic', name: '섬머소닉', location: '일본 도쿄/오사카', type: 'Multi-genre' },
         { id: 'rock_in_japan', name: 'Rock in Japan', location: '일본 이바라키', type: 'Rock/J-Pop' },
-        { id: 'pentaport', name: '인천 펜타포트 락페스티벌', location: '인천', type: 'Rock/Multi-genre' },
-        { id: 'grand_mint', name: '그랜드 민트 페스티벌', location: '서울', type: 'Indie/Folk' },
-        { id: 'waterbomb', name: '워터밤', location: '서울', type: 'Hip-Hop/Electronic' },
-        { id: 'rainbow_island', name: '무지개섬', location: '인천', type: 'Electronic' },
-        { id: 'kb_rapbeat', name: 'KB 랩비트 페스티벌', location: '서울', type: 'Hip-Hop' },
-        { id: 'zandari', name: '잔다리 페스타', location: '서울', type: 'Indie' },
-        { id: 'wonderfruit', name: 'Wonderfruit', location: '태국', type: 'Multi-genre/Art' },
-        { id: 'djakarta_warehouse', name: 'Djakarta Warehouse Project', location: '인도네시아', type: 'Electronic' },
         { id: 'clockenflap', name: 'Clockenflap', location: '홍콩', type: 'Multi-genre' },
-        { id: 'primavera', name: 'Primavera Sound', location: '스페인 바르셀로나', type: 'Indie/Alternative' },
-        { id: 'roskilde', name: 'Roskilde Festival', location: '덴마크', type: 'Multi-genre' },
-        { id: 'exit', name: 'EXIT Festival', location: '세르비아', type: 'Electronic/Rock' },
-        { id: 'sziget', name: 'Sziget Festival', location: '헝가리 부다페스트', type: 'Multi-genre' },
+        { id: 'wonderfruit', name: 'Wonderfruit', location: '태국', type: 'Multi-genre/Art' },
     ];
 
     const moodOptions = [
@@ -376,6 +400,9 @@ const Profile: React.FC = () => {
                 
                 // 기본 정보에서 실제 이름을 가져와서 사용
                 const actualName = basicInfo?.name || '뮤직러버'; // fallback
+                
+                // 전역 사용자 정보도 업데이트
+                setUser({ id: userId, name: actualName });
                 
                 setProfile((prev) => normalizeProfile({ 
                     ...prev, 

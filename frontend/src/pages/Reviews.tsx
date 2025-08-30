@@ -72,6 +72,13 @@ const Reviews: React.FC = () => {
     fetchCurrentUser();
   }, []);
 
+  // currentUserId가 변경되면 내 리뷰 탭일 때 다시 로드
+  useEffect(() => {
+    if (currentUserId && activeTab === 'my-reviews') {
+      loadReviews();
+    }
+  }, [currentUserId]);
+
   const loadReviews = async () => {
     console.log(`=== loadReviews 호출 - activeTab: ${activeTab}, currentPage: ${currentPage} ===`);
     try {
@@ -90,7 +97,13 @@ const Reviews: React.FC = () => {
           setTotalPages(Math.min(data.totalPages || 0, 3)); // 최대 3페이지
           break;
         case 'my-reviews':
-          data = await fetch(`http://localhost:9090/api/reviews/user/1?page=${currentPage}&size=10`, {
+          if (!currentUserId) {
+            console.warn('currentUserId가 없습니다. 사용자 정보를 먼저 가져와야 합니다.');
+            setReviews([]);
+            setTotalPages(0);
+            break;
+          }
+          data = await fetch(`http://localhost:9090/api/reviews/user/${currentUserId}?page=${currentPage}&size=10`, {
             credentials: 'include'
           }).then(r => r.json());
           setReviews(data.content || []);
@@ -188,8 +201,17 @@ const Reviews: React.FC = () => {
 
       if (response.ok) {
         setShowReviewForm(false);
-        loadReviews(); // 새로고침하여 새 리뷰 표시
+        setActiveTab('my-reviews'); // 리뷰 작성 후 "내 리뷰" 탭으로 이동
+        setCurrentPage(0); // 첫 페이지로 이동
+        
+        // 잠시 기다린 후 새로고침 (DB 반영 시간 고려)
+        setTimeout(() => {
+          loadReviews();
+        }, 500);
+        
         alert('리뷰가 성공적으로 등록되었습니다!');
+      } else if (response.status === 409) {
+        alert('이미 이 곡에 대한 리뷰를 작성하셨습니다. 기존 리뷰를 수정하거나 삭제 후 다시 작성해주세요.');
       } else {
         alert('리뷰 등록에 실패했습니다.');
       }
@@ -296,7 +318,19 @@ const Reviews: React.FC = () => {
         }}
       >
         {badge.iconUrl ? (
-          <img src={badge.iconUrl} alt={badge.badgeName} className="w-10 h-10" />
+          <img 
+            src={badge.iconUrl} 
+            alt={badge.badgeName} 
+            className="w-12 h-12 rounded-full"
+            onError={(e) => {
+              const target = e.currentTarget as HTMLImageElement;
+              target.style.display = 'none';
+              // 부모 div에 기본 이모지 표시
+              if (target.parentElement) {
+                target.parentElement.innerHTML = '🏆';
+              }
+            }}
+          />
         ) : (
           '🏆'
         )}

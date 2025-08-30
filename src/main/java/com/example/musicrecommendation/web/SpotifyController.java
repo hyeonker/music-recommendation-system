@@ -63,6 +63,43 @@ public class SpotifyController {
     }
 
     /**
+     * 특정 아티스트의 곡 검색
+     * 예) GET /api/spotify/search/artist-tracks?artist=Radiohead&q=there&limit=10
+     */
+    @GetMapping("/search/artist-tracks")
+    public List<TrackDto> searchArtistTracks(
+            @RequestParam(name = "artist", required = true) String artist,
+            @RequestParam(name = "q", required = false) String q,
+            @RequestParam(name = "limit", defaultValue = "10") int limit
+    ) {
+        String query = (q == null) ? "" : q.trim();
+        String artistName = artist.trim();
+
+        if (query.isEmpty() || artistName.isEmpty()) {
+            return List.of();
+        }
+
+        int safeLimit = Math.max(1, Math.min(limit, 20));
+
+        return spotifyService.searchArtistTracks(artistName, query, safeLimit);
+    }
+
+    /**
+     * 아티스트의 인기 곡 가져오기
+     * 예) GET /api/spotify/artist/4Z8W4fKeB5YxbusRsdQVPb/top-tracks?market=KR&limit=10
+     */
+    @GetMapping("/artist/{artistId}/top-tracks")
+    public List<TrackDto> getArtistTopTracks(
+            @PathVariable String artistId,
+            @RequestParam(name = "market", defaultValue = "KR") String market,
+            @RequestParam(name = "limit", defaultValue = "10") int limit
+    ) {
+        int safeLimit = Math.max(1, Math.min(limit, 20));
+        return spotifyService.getArtistTopTracks(artistId, market, safeLimit);
+    }
+
+
+    /**
      * 간단 헬스체크 (토큰 갱신 가능 여부 확인용)
      * 예) GET /api/spotify/health
      */
