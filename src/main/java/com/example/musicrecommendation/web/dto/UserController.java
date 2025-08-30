@@ -191,21 +191,6 @@ public class UserController {
         return ResponseEntity.ok(count);
     }
     
-    /**
-     * 모든 사용자 조회 (임시 - 권한 체크 제거)
-     */
-    @GetMapping("/all")
-    @Operation(summary = "전체 사용자 조회", description = "모든 사용자 정보를 조회합니다. (임시)")
-    @ApiResponse(responseCode = "200", description = "조회 성공")
-    public ResponseEntity<List<UserResponse>> getAllUsersForAdmin() {
-        
-        List<User> users = userService.findAllUsers();
-        List<UserResponse> responses = users.stream()
-                .map(UserResponse::from)
-                .toList();
-        
-        return ResponseEntity.ok(responses);
-    }
     
     /**
      * 닉네임 중복 확인
