@@ -55,7 +55,7 @@ public class SecurityConfig {
                                 "/api/reviews/music-item/*/rating", // 평점 평균 조회 허용
                                 "/api/reviews/music-item/*/count",   // 리뷰 개수 조회 허용
                                 "/api/reviews/tags",          // 태그 목록 조회 허용
-                                "/api/badges/statistics",     // 배지 통계 조회 허용
+                                "/api/badges/**",             // 배지 API 허용 (디버그용)
                                 "/api/likes/**",              // 좋아요 API 허용
                                 "/actuator/**",
                                 "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**"
@@ -76,7 +76,8 @@ public class SecurityConfig {
                         new AntPathRequestMatcher("/api/badges/**"),
                         new AntPathRequestMatcher("/api/recommendations/**"),
                         new AntPathRequestMatcher("/api/likes/**"),
-                        new AntPathRequestMatcher("/api/admin/**")
+                        new AntPathRequestMatcher("/api/admin/**"),
+                        new AntPathRequestMatcher("/api/notifications/**")
                 ))
 
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
