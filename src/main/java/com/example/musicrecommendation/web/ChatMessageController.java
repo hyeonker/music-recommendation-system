@@ -1,8 +1,11 @@
 package com.example.musicrecommendation.web;
 
 import com.example.musicrecommendation.service.ChatMessageService;
+import com.example.musicrecommendation.service.SecureChatRoomService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -16,48 +19,106 @@ import com.example.musicrecommendation.web.dto.ChatMessageCreateRequest;
 public class ChatMessageController {
 
     private final ChatMessageService chatMessageService;
+    private final SecureChatRoomService secureChatRoomService;
+    private final com.example.musicrecommendation.service.UserService userService;
 
     @GetMapping("/rooms/{roomId}/messages")
-    public ResponseEntity<List<ChatMessageService.ChatMessageDto>> getMessages(
+    public ResponseEntity<?> getMessages(
             @PathVariable String roomId,
             @RequestParam(defaultValue = "50") int limit,
-            @RequestParam(defaultValue = "asc") String order
+            @RequestParam(defaultValue = "asc") String order,
+            @AuthenticationPrincipal OAuth2User oAuth2User
     ) {
+        // 사용자 인증 확인
+        Long userId = getCurrentUserId(oAuth2User);
+        if (userId == null) {
+            return ResponseEntity.status(401).body("인증이 필요합니다");
+        }
+        
+        // 채팅방 접근 권한 확인
+        if (!secureChatRoomService.hasRoomAccess(roomId, userId)) {
+            return ResponseEntity.status(403).body("채팅방 접근 권한이 없습니다");
+        }
+        
         int safeLimit = Math.min(Math.max(limit, 1), 100);
         boolean asc = !"desc".equalsIgnoreCase(order);
-        // roomId를 Long으로 변환하거나 해시 처리
         Long normalizedRoomId = normalizeRoomId(roomId);
         return ResponseEntity.ok(chatMessageService.getMessages(normalizedRoomId, safeLimit, asc));
     }
 
     @PostMapping("/rooms/{roomId}/messages")
-    public ResponseEntity<Void> postMessage(
+    public ResponseEntity<?> postMessage(
             @PathVariable String roomId,
-            @RequestParam(required = true) Long senderId,
-            @RequestParam(required = false, defaultValue = "") String content
+            @RequestParam(required = false, defaultValue = "") String content,
+            @AuthenticationPrincipal OAuth2User oAuth2User
     ) {
-        if (content.trim().isEmpty()) return ResponseEntity.badRequest().build();
+        // 사용자 인증 확인
+        Long userId = getCurrentUserId(oAuth2User);
+        if (userId == null) {
+            return ResponseEntity.status(401).body("인증이 필요합니다");
+        }
         
-        // roomId를 Long으로 변환하거나 해시 처리
+        // 채팅방 접근 권한 확인
+        if (!secureChatRoomService.hasRoomAccess(roomId, userId)) {
+            return ResponseEntity.status(403).body("채팅방 접근 권한이 없습니다");
+        }
+        
+        if (content.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body("메시지 내용이 필요합니다");
+        }
+        
+        // 채팅방 활동 업데이트
+        secureChatRoomService.updateRoomActivity(roomId);
+        
         Long normalizedRoomId = normalizeRoomId(roomId);
-        chatMessageService.saveText(normalizedRoomId, senderId, content.trim());
+        chatMessageService.saveText(normalizedRoomId, userId, content.trim());
         return ResponseEntity.ok().build();
     }
 
     @PostMapping(value = "/rooms/{roomId}/messages", consumes = "application/json")
-    public ResponseEntity<Void> postMessageJson(
+    public ResponseEntity<?> postMessageJson(
             @PathVariable String roomId,
-            @RequestBody ChatMessageCreateRequest request
+            @RequestBody ChatMessageCreateRequest request,
+            @AuthenticationPrincipal OAuth2User oAuth2User
     ) {
-        if (request.content().trim().isEmpty()) return ResponseEntity.badRequest().build();
-        
-        if (request.senderId() == null) {
-            throw new IllegalArgumentException("senderId는 필수입니다");
+        // 사용자 인증 확인
+        Long userId = getCurrentUserId(oAuth2User);
+        if (userId == null) {
+            return ResponseEntity.status(401).body("인증이 필요합니다");
         }
-        Long senderId = request.senderId();
+        
+        // 채팅방 접근 권한 확인
+        if (!secureChatRoomService.hasRoomAccess(roomId, userId)) {
+            return ResponseEntity.status(403).body("채팅방 접근 권한이 없습니다");
+        }
+        
+        if (request.content().trim().isEmpty()) {
+            return ResponseEntity.badRequest().body("메시지 내용이 필요합니다");
+        }
+        
+        // 채팅방 활동 업데이트
+        secureChatRoomService.updateRoomActivity(roomId);
+        
         Long normalizedRoomId = normalizeRoomId(roomId);
-        chatMessageService.saveText(normalizedRoomId, senderId, request.content().trim());
+        chatMessageService.saveText(normalizedRoomId, userId, request.content().trim());
         return ResponseEntity.ok().build();
+    }
+    
+    // 현재 로그인된 사용자 ID 조회
+    private Long getCurrentUserId(OAuth2User oAuth2User) {
+        if (oAuth2User == null) return null;
+        
+        try {
+            String email = oAuth2User.getAttribute("email");
+            if (email != null) {
+                return userService.findUserByEmail(email)
+                    .map(user -> user.getId())
+                    .orElse(null);
+            }
+        } catch (Exception e) {
+            System.err.println("사용자 ID 조회 실패: " + e.getMessage());
+        }
+        return null;
     }
     
     // roomId 정규화 헬퍼 메소드

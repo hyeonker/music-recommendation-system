@@ -175,16 +175,121 @@ public class MusicRecommendationEngine {
             if (i < trending.size() && combined.size() < targetCount) combined.add(trending.get(i));
         }
         
-        // 중복 제거 (trackId 기준)
-        Map<String, Map<String, Object>> uniqueTracks = new LinkedHashMap<>();
-        for (var track : combined) {
+        // 전면 개선: ID, 아티스트, 제목 기반 중복 제거
+        return removeDuplicatesAndEnsureDiversity(combined, targetCount);
+    }
+    
+    /**
+     * 고도화된 중복 제거 및 다양성 보장
+     */
+    private List<Map<String, Object>> removeDuplicatesAndEnsureDiversity(
+            List<Map<String, Object>> tracks, int targetCount) {
+        
+        Set<String> usedIds = new HashSet<>();
+        Set<String> usedTitles = new HashSet<>();
+        Map<String, Integer> artistCount = new HashMap<>();
+        Map<String, Integer> genreCount = new HashMap<>();
+        
+        List<Map<String, Object>> diverseTracks = new ArrayList<>();
+        
+        // 가중치를 기반으로 정렬 (recommendationType에 따라)
+        tracks.sort((a, b) -> {
+            String typeA = (String) a.getOrDefault("recommendationType", "unknown");
+            String typeB = (String) b.getOrDefault("recommendationType", "unknown");
+            
+            int priorityA = getRecommendationPriority(typeA);
+            int priorityB = getRecommendationPriority(typeB);
+            
+            return Integer.compare(priorityB, priorityA); // 높은 우선순위 먼저
+        });
+        
+        for (Map<String, Object> track : tracks) {
+            if (diverseTracks.size() >= targetCount) break;
+            
             String trackId = (String) track.get("id");
-            uniqueTracks.put(trackId, track);
+            String title = ((String) track.get("name")).toLowerCase().trim();
+            String artist = (String) track.get("artist");
+            String genre = (String) track.get("genre");
+            
+            // ID 중복 체크
+            if (usedIds.contains(trackId)) continue;
+            
+            // 제목 유사성 체크 (유사한 제목 방지)
+            boolean titleSimilar = usedTitles.stream()
+                .anyMatch(usedTitle -> calculateStringSimilarity(title, usedTitle) > 0.8);
+            if (titleSimilar) continue;
+            
+            // 아티스트 다양성 (동일 아티스트 최대 2곡)
+            int currentArtistCount = artistCount.getOrDefault(artist, 0);
+            if (currentArtistCount >= 2) continue;
+            
+            // 장르 다양성 (동일 장르 최대 절반)
+            int currentGenreCount = genreCount.getOrDefault(genre, 0);
+            int maxGenreCount = Math.max(1, targetCount / 3);
+            if (currentGenreCount >= maxGenreCount) continue;
+            
+            // 통과한 트랙 추가
+            diverseTracks.add(track);
+            usedIds.add(trackId);
+            usedTitles.add(title);
+            artistCount.put(artist, currentArtistCount + 1);
+            genreCount.put(genre, currentGenreCount + 1);
         }
         
-        return new ArrayList<>(uniqueTracks.values()).stream()
-                .limit(targetCount)
-                .toList();
+        return diverseTracks;
+    }
+    
+    /**
+     * 추천 타입 별 우선순위 반환
+     */
+    private int getRecommendationPriority(String recommendationType) {
+        return switch (recommendationType) {
+            case "content_based" -> 10;
+            case "artist_similarity" -> 9;
+            case "collaborative" -> 8;
+            case "trending" -> 6;
+            case "fallback" -> 1;
+            default -> 5;
+        };
+    }
+    
+    /**
+     * 문자열 유사도 계산 (Levenshtein Distance 기반)
+     */
+    private double calculateStringSimilarity(String str1, String str2) {
+        if (str1.equals(str2)) return 1.0;
+        
+        int maxLength = Math.max(str1.length(), str2.length());
+        if (maxLength == 0) return 1.0;
+        
+        int distance = levenshteinDistance(str1, str2);
+        return 1.0 - (double) distance / maxLength;
+    }
+    
+    /**
+     * Levenshtein Distance 계산
+     */
+    private int levenshteinDistance(String str1, String str2) {
+        int[][] dp = new int[str1.length() + 1][str2.length() + 1];
+        
+        for (int i = 0; i <= str1.length(); i++) {
+            for (int j = 0; j <= str2.length(); j++) {
+                if (i == 0) {
+                    dp[i][j] = j;
+                } else if (j == 0) {
+                    dp[i][j] = i;
+                } else {
+                    dp[i][j] = Math.min(
+                        Math.min(
+                            dp[i - 1][j] + 1,        // deletion
+                            dp[i][j - 1] + 1),       // insertion
+                        dp[i - 1][j - 1] + (str1.charAt(i - 1) == str2.charAt(j - 1) ? 0 : 1) // substitution
+                    );
+                }
+            }
+        }
+        
+        return dp[str1.length()][str2.length()];
     }
     
     /**
@@ -280,42 +385,67 @@ public class MusicRecommendationEngine {
     
     private List<Map<String, Object>> generateGenreBasedTracks(String genre, int count) {
         List<Map<String, Object>> tracks = new ArrayList<>();
-        tracks.add(Map.of(
-            "id", "genre_" + genre.toLowerCase() + "_1",
-            "name", "Best of " + genre + " #1",
-            "artist", genre + " Master",
-            "album", "Greatest " + genre + " Hits",
-            "genre", genre,
-            "duration", "3:45",
-            "popularity", 85,
-            "recommendationType", "content_based"
-        ));
-        tracks.add(Map.of(
-            "id", "genre_" + genre.toLowerCase() + "_2", 
-            "name", "Modern " + genre + " Classic",
-            "artist", "Contemporary " + genre + " Artist",
-            "album", "New Wave " + genre,
-            "genre", genre,
-            "duration", "4:12",
-            "popularity", 78,
-            "recommendationType", "content_based"
-        ));
-        return tracks.stream().limit(count).toList();
+        
+        // 장르별 대표 곡들 (다양성 보장)
+        String[] trackTemplates = {
+            "Essential " + genre + " Collection",
+            "Modern " + genre + " Masterpiece",
+            "Classic " + genre + " Revival",
+            "Underground " + genre + " Gem",
+            "Fresh " + genre + " Sound"
+        };
+        
+        String[] artistTemplates = {
+            genre + " Pioneer",
+            "New Wave " + genre,
+            genre + " Collective",
+            "Rising " + genre + " Star",
+            genre + " Innovator"
+        };
+        
+        for (int i = 0; i < Math.min(count, trackTemplates.length); i++) {
+            tracks.add(Map.of(
+                "id", "genre_" + genre.toLowerCase().replaceAll("\\s+", "_") + "_" + System.nanoTime() + "_" + i,
+                "name", trackTemplates[i],
+                "artist", artistTemplates[i],
+                "album", "Best of " + genre + " " + (2020 + i),
+                "genre", genre,
+                "duration", String.format("%d:%02d", 3 + (i % 3), 15 + (i * 13) % 50),
+                "popularity", 75 + new Random().nextInt(20),
+                "recommendationType", "content_based",
+                "personalityScore", 0.8 + (i * 0.05)
+            ));
+        }
+        
+        return tracks;
     }
     
     private List<Map<String, Object>> generateArtistSimilarTracks(String artist, int count) {
         List<Map<String, Object>> tracks = new ArrayList<>();
-        tracks.add(Map.of(
-            "id", "similar_to_" + artist.replaceAll("\\s+", "_").toLowerCase(),
-            "name", "Song Similar to " + artist,
-            "artist", "Artist Like " + artist,
-            "album", "Similar Artists Collection",
-            "genre", "Similar Style",
-            "duration", "3:28",
-            "popularity", 72,
-            "recommendationType", "artist_similarity"
-        ));
-        return tracks.stream().limit(count).toList();
+        
+        String[] similarityTypes = {
+            "Style Inspired by " + artist,
+            "Sound Like " + artist,
+            "Influenced by " + artist + " Era",
+            "Reminiscent of " + artist
+        };
+        
+        for (int i = 0; i < Math.min(count, similarityTypes.length); i++) {
+            String uniqueId = "similar_" + artist.replaceAll("\\s+", "_").toLowerCase() + "_" + System.nanoTime() + "_" + i;
+            tracks.add(Map.of(
+                "id", uniqueId,
+                "name", similarityTypes[i],
+                "artist", "Artist Similar to " + artist,
+                "album", "Artists Like " + artist + " Collection",
+                "genre", "Similar Style",
+                "duration", String.format("%d:%02d", 3 + (i % 2), 20 + (i * 17) % 40),
+                "popularity", 70 + new Random().nextInt(25),
+                "recommendationType", "artist_similarity",
+                "personalityScore", 0.9 // 아티스트 유사성은 가장 높은 개인화 점수
+            ));
+        }
+        
+        return tracks;
     }
     
     private List<Map<String, Object>> generateRecommendationsFromSimilarUser(ProfileDto similarUserProfile, int count) {

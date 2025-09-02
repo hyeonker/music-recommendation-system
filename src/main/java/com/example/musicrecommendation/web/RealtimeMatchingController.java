@@ -117,35 +117,27 @@ public class RealtimeMatchingController {
 
     @GetMapping("/chat/room/{userId}")
     @Operation(summary = "💬 채팅방 정보", description = "사용자의 현재 채팅방 정보를 조회합니다")
+    @Deprecated // 보안상 위험하므로 사용 중단 권고
     public ResponseEntity<?> getChatRoomInfo(
             @Parameter(description = "사용자 ID") @PathVariable Long userId) {
-        try {
-            Object result = chatRoomService.getUserChatRoom(userId);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            return ResponseEntity.ok(new Object() {
-                public final boolean success = false;
-                public final String message = "채팅방 정보 조회 중 오류 발생";
-                public final String error = e.getMessage();
-            });
-        }
+        return ResponseEntity.status(403).body(new Object() {
+            public final boolean success = false;
+            public final String message = "보안상 이유로 이 API는 더 이상 지원되지 않습니다";
+            public final String alternative = "인증된 사용자는 /api/chat/rooms를 사용하세요";
+        });
     }
 
     @GetMapping("/chat/history/{roomId}")
     @Operation(summary = "📜 채팅 히스토리", description = "채팅방의 메시지 히스토리를 조회합니다")
+    @Deprecated // 보안상 위험하므로 사용 중단 권고
     public ResponseEntity<?> getChatHistory(
             @Parameter(description = "채팅방 ID") @PathVariable String roomId,
             @Parameter(description = "사용자 ID") @RequestParam Long userId) {
-        try {
-            Object result = chatRoomService.getChatHistory(roomId, userId);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            return ResponseEntity.ok(new Object() {
-                public final boolean success = false;
-                public final String message = "채팅 히스토리 조회 중 오류 발생";
-                public final String error = e.getMessage();
-            });
-        }
+        return ResponseEntity.status(403).body(new Object() {
+            public final boolean success = false;
+            public final String message = "보안상 이유로 이 API는 더 이상 지원되지 않습니다";
+            public final String alternative = "인증된 사용자는 /api/chat/rooms/{roomId}/messages를 사용하세요";
+        });
     }
 
     @PostMapping("/chat/send")

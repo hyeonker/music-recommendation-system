@@ -81,6 +81,7 @@ public class MusicRecommendationController {
 
     private List<Map<String, Object>> generateSpotifyBasedRecommendations(Long userId) {
         List<Map<String, Object>> recommendations = new ArrayList<>();
+        Set<String> usedTrackIds = new HashSet<>(); // 중복 방지
         Random random = new Random();
         
         try {
@@ -91,95 +92,208 @@ public class MusicRecommendationController {
             List<String> reviewBasedArtists = getArtistsFromUserReviews(userId);
             List<String> reviewBasedGenres = getGenresFromUserReviews(userId);
             
-            // 3. 프로필과 리뷰 데이터 결합
-            List<String> allArtists = new ArrayList<>();
-            List<String> allGenres = new ArrayList<>();
+            // 3. 프로필과 리뷰 데이터 결합 및 가중치 적용
+            List<WeightedRecommendationSource> weightedSources = new ArrayList<>();
             
-            // 프로필 선호 아티스트 추가
-            List<Map<String, Object>> favoriteArtists = profile.getFavoriteArtists();
-            favoriteArtists.forEach(artist -> allArtists.add((String) artist.get("name")));
+            // 리뷰 기반 아티스트 (가장 높은 가중치)
+            reviewBasedArtists.forEach(artist -> 
+                weightedSources.add(new WeightedRecommendationSource(artist, "ARTIST", "리뷰 기반", 0.9)));
+                
+            // 프로필 선호 아티스트
+            profile.getFavoriteArtists().forEach(artist -> 
+                weightedSources.add(new WeightedRecommendationSource(
+                    (String) artist.get("name"), "ARTIST", "선호 아티스트", 0.7)));
             
-            // 리뷰 기반 아티스트 추가
-            allArtists.addAll(reviewBasedArtists);
+            // 리뷰 기반 장르
+            reviewBasedGenres.forEach(genre -> 
+                weightedSources.add(new WeightedRecommendationSource(genre, "GENRE", "리뷰 기반", 0.6)));
+                
+            // 프로필 선호 장르
+            profile.getFavoriteGenres().forEach(genre -> 
+                weightedSources.add(new WeightedRecommendationSource(
+                    (String) genre.get("name"), "GENRE", "선호 장르", 0.5)));
             
-            // 프로필 선호 장르 추가
-            List<Map<String, Object>> favoriteGenres = profile.getFavoriteGenres();
-            favoriteGenres.forEach(genre -> allGenres.add((String) genre.get("name")));
+            // 4. 가중치 기준 정렬 (높은 가중치부터)
+            weightedSources.sort((a, b) -> Double.compare(b.weight, a.weight));
             
-            // 리뷰 기반 장르 추가
-            allGenres.addAll(reviewBasedGenres);
-            
-            // 4. 랜덤하게 섞어서 다양성 확보
-            Collections.shuffle(allArtists, random);
-            Collections.shuffle(allGenres, random);
-            
-            // 5. 아티스트 기반 추천 (최대 2곡)
-            for (int i = 0; i < Math.min(2, allArtists.size()) && recommendations.size() < 4; i++) {
-                String artistName = allArtists.get(i);
+            // 5. 개인화된 추천 생성 (중복 제거 포함)
+            for (WeightedRecommendationSource source : weightedSources) {
+                if (recommendations.size() >= 8) break; // 최대 8곡
+                
                 try {
-                    List<TrackDto> tracks = spotifyService.searchTracks(artistName, 5); // 더 많이 검색
+                    List<TrackDto> tracks = spotifyService.searchTracks(source.value, 10);
                     if (!tracks.isEmpty()) {
-                        // 랜덤하게 선택
-                        TrackDto selectedTrack = tracks.get(random.nextInt(tracks.size()));
-                        String source = reviewBasedArtists.contains(artistName) ? "리뷰 기반" : "선호 아티스트";
-                        recommendations.add(createRecommendationMap(selectedTrack, source));
+                        // 인기도와 개인화 점수를 고려한 선택
+                        TrackDto bestTrack = selectBestTrack(tracks, source.weight, usedTrackIds);
+                        if (bestTrack != null) {
+                            Map<String, Object> recommendation = createRecommendationMap(bestTrack, source.description);
+                            recommendations.add(recommendation);
+                            usedTrackIds.add(bestTrack.getId());
+                        }
                     }
                 } catch (Exception e) {
                     // 개별 검색 실패는 무시
                 }
             }
             
-            // 6. 장르 기반 추천 (나머지 채우기)
-            for (int i = 0; i < allGenres.size() && recommendations.size() < 4; i++) {
-                String genreName = allGenres.get(i);
-                try {
-                    List<TrackDto> tracks = spotifyService.searchTracks(genreName, 5); // 더 많이 검색
-                    if (!tracks.isEmpty()) {
-                        // 랜덤하게 선택
-                        TrackDto selectedTrack = tracks.get(random.nextInt(tracks.size()));
-                        String source = reviewBasedGenres.contains(genreName) ? "리뷰 기반" : "선호 장르";
-                        recommendations.add(createRecommendationMap(selectedTrack, source));
-                    }
-                } catch (Exception e) {
-                    // 개별 검색 실패는 무시
-                }
-            }
-            
-            // 7. 부족하면 인기곡으로 채우기
+            // 6. 부족하면 트렌딩 곡으로 스마트 보충
             if (recommendations.size() < 4) {
-                try {
-                    List<String> fallbackGenres = List.of("pop", "rock", "indie", "electronic", "hip-hop");
-                    String randomGenre = fallbackGenres.get(random.nextInt(fallbackGenres.size()));
-                    List<TrackDto> tracks = spotifyService.searchTracks(randomGenre, 10);
-                    
-                    while (recommendations.size() < 4 && !tracks.isEmpty()) {
-                        TrackDto randomTrack = tracks.get(random.nextInt(tracks.size()));
-                        recommendations.add(createRecommendationMap(randomTrack, "인기곡"));
-                        tracks.remove(randomTrack); // 중복 방지
-                    }
-                } catch (Exception e) {
-                    // 기본 검색도 실패하면 빈 리스트 반환
-                }
+                List<String> trendingGenres = getTrendingGenresForUser(profile);
+                fillWithTrendingTracks(recommendations, usedTrackIds, trendingGenres);
             }
             
         } catch (Exception e) {
             // 전체 실패 시 빈 리스트 반환
         }
         
-        return recommendations;
+        // 7. 최종 중복 제거 및 다양성 보장
+        return ensureDiversityAndRemoveDuplicates(recommendations);
+    }
+    
+    private static class WeightedRecommendationSource {
+        final String value;
+        final String type;
+        final String description;
+        final double weight;
+        
+        WeightedRecommendationSource(String value, String type, String description, double weight) {
+            this.value = value;
+            this.type = type;
+            this.description = description;
+            this.weight = weight;
+        }
+    }
+    
+    private TrackDto selectBestTrack(List<TrackDto> tracks, double userWeight, Set<String> usedIds) {
+        // 이미 사용된 트랙 제외
+        List<TrackDto> availableTracks = tracks.stream()
+            .filter(track -> !usedIds.contains(track.getId()))
+            .toList();
+            
+        if (availableTracks.isEmpty()) return null;
+        
+        // 인기도와 개인화 가중치를 결합한 점수 계산
+        return availableTracks.stream()
+            .max((a, b) -> {
+                double scoreA = (a.getPopularity() / 100.0) * 0.3 + userWeight * 0.7;
+                double scoreB = (b.getPopularity() / 100.0) * 0.3 + userWeight * 0.7;
+                return Double.compare(scoreA, scoreB);
+            })
+            .orElse(availableTracks.get(0));
+    }
+    
+    private List<String> getTrendingGenresForUser(ProfileDto profile) {
+        Set<String> userGenres = profile.getFavoriteGenres().stream()
+            .map(genre -> (String) genre.get("name"))
+            .collect(Collectors.toSet());
+            
+        List<String> allTrendingGenres = List.of("pop", "indie pop", "alternative rock", 
+            "electronic", "k-pop", "hip hop", "R&B", "indie folk");
+            
+        // 사용자 선호도와 관련된 트렌딩 장르 우선
+        return allTrendingGenres.stream()
+            .filter(genre -> userGenres.stream().anyMatch(userGenre -> 
+                genre.toLowerCase().contains(userGenre.toLowerCase()) || 
+                userGenre.toLowerCase().contains(genre.toLowerCase())))
+            .toList();
+    }
+    
+    private void fillWithTrendingTracks(List<Map<String, Object>> recommendations, 
+                                       Set<String> usedIds, List<String> trendingGenres) {
+        Random random = new Random();
+        
+        while (recommendations.size() < 4 && !trendingGenres.isEmpty()) {
+            String genre = trendingGenres.get(random.nextInt(trendingGenres.size()));
+            try {
+                List<TrackDto> tracks = spotifyService.searchTracks(genre + " 2024", 5);
+                TrackDto bestTrack = selectBestTrack(tracks, 0.4, usedIds);
+                
+                if (bestTrack != null) {
+                    recommendations.add(createRecommendationMap(bestTrack, "트렌딩"));
+                    usedIds.add(bestTrack.getId());
+                }
+            } catch (Exception e) {
+                // 실패 시 해당 장르 제거
+            }
+            trendingGenres.remove(genre);
+        }
+    }
+    
+    private List<Map<String, Object>> ensureDiversityAndRemoveDuplicates(List<Map<String, Object>> recommendations) {
+        Map<String, Map<String, Object>> uniqueById = new LinkedHashMap<>();
+        Map<String, Integer> artistCount = new HashMap<>();
+        Map<String, Integer> genreCount = new HashMap<>();
+        
+        List<Map<String, Object>> diverseRecommendations = new ArrayList<>();
+        
+        for (Map<String, Object> rec : recommendations) {
+            String trackId = (String) rec.get("id");
+            String artist = (String) rec.get("artist");
+            String genre = (String) rec.get("genre");
+            
+            // ID 중복 체크
+            if (uniqueById.containsKey(trackId)) continue;
+            
+            // 아티스트 다양성 체크 (같은 아티스트 최대 2곡)
+            int artistFreq = artistCount.getOrDefault(artist, 0);
+            if (artistFreq >= 2) continue;
+            
+            // 장르 다양성 체크 (같은 장르 최대 3곡)
+            int genreFreq = genreCount.getOrDefault(genre, 0);
+            if (genreFreq >= 3) continue;
+            
+            // 통과한 추천 추가
+            uniqueById.put(trackId, rec);
+            diverseRecommendations.add(rec);
+            artistCount.put(artist, artistFreq + 1);
+            genreCount.put(genre, genreFreq + 1);
+        }
+        
+        return diverseRecommendations;
     }
     
     private Map<String, Object> createRecommendationMap(TrackDto track, String recommendationType) {
-        return Map.of(
-                "id", track.getId(),
-                "title", track.getName(),
-                "artist", track.getArtists().isEmpty() ? "Unknown Artist" : track.getArtists().get(0).getName(),
-                "image", track.getAlbum() != null && !track.getAlbum().getImages().isEmpty() 
-                    ? track.getAlbum().getImages().get(0).getUrl() 
-                    : "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop",
-                "genre", recommendationType,
-                "score", 85 + new Random().nextInt(15)
-        );
+        // 개인화 점수 계산 (실제 Spotify 데이터 기반)
+        int personalityScore = calculatePersonalizedScore(track, recommendationType);
+        
+        Map<String, Object> recommendation = new HashMap<>();
+        recommendation.put("id", track.getId());
+        recommendation.put("title", track.getName());
+        recommendation.put("artist", track.getArtists().isEmpty() ? "Unknown Artist" : track.getArtists().get(0).getName());
+        recommendation.put("image", track.getAlbum() != null && !track.getAlbum().getImages().isEmpty() 
+            ? track.getAlbum().getImages().get(0).getUrl() 
+            : "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop");
+        recommendation.put("genre", recommendationType);
+        recommendation.put("score", personalityScore);
+        recommendation.put("spotifyId", track.getId());
+        recommendation.put("popularity", track.getPopularity());
+        recommendation.put("duration", track.getDurationMs() != null ? formatDuration(track.getDurationMs()) : "3:30");
+        
+        return recommendation;
+    }
+    
+    private int calculatePersonalizedScore(TrackDto track, String recommendationType) {
+        int baseScore = switch (recommendationType) {
+            case "리뷰 기반" -> 92;
+            case "선호 아티스트" -> 88;
+            case "선호 장르" -> 85;
+            case "트렌딩" -> 80;
+            default -> 75;
+        };
+        
+        // Spotify 인기도 반영 (0-100)
+        int popularityBonus = track.getPopularity() / 10; // 0-10 보너스
+        
+        // 최종 점수 계산 (70-100 범위)
+        return Math.min(100, Math.max(70, baseScore + popularityBonus - 5 + new Random().nextInt(6)));
+    }
+    
+    private String formatDuration(Integer durationMs) {
+        if (durationMs == null) return "3:30";
+        
+        int minutes = durationMs / (1000 * 60);
+        int seconds = (durationMs % (1000 * 60)) / 1000;
+        return String.format("%d:%02d", minutes, seconds);
     }
     
     /**

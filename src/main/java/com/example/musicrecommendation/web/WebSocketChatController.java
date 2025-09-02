@@ -1,6 +1,10 @@
 package com.example.musicrecommendation.web;
 
 import com.example.musicrecommendation.service.ChatMessageService;
+import com.example.musicrecommendation.service.SecureChatRoomService;
+import com.example.musicrecommendation.service.ChatRateLimitService;
+import com.example.musicrecommendation.service.ChatExpiryNotificationService;
+import com.example.musicrecommendation.config.ChatSecurityConfig;
 import com.example.musicrecommendation.web.dto.ChatMessageCreateRequest;
 import com.example.musicrecommendation.web.dto.ChatMessageResponse;
 import lombok.RequiredArgsConstructor;
@@ -24,26 +28,92 @@ public class WebSocketChatController {
     private final ChatMessageService chatMessageService;
     private final SimpMessagingTemplate messagingTemplate;
     private final com.example.musicrecommendation.service.UserService userService;
+    private final SecureChatRoomService secureChatRoomService;
+    private final ChatRateLimitService rateLimitService;
+    private final ChatExpiryNotificationService expiryNotificationService;
+    private final ChatSecurityConfig securityConfig;
 
     /**
      * 특정 채팅방에 메시지 전송
      * 클라이언트에서 /app/chat.sendMessage/{roomId} 로 메시지 전송
      */
     @MessageMapping("/chat.sendMessage/{roomId}")
-    @SendTo("/topic/room.{roomId}")
-    public Object sendMessage(@DestinationVariable String roomId,
+    public void sendMessage(@DestinationVariable String roomId,
                             @Payload ChatMessageCreateRequest message) {
         try {
-            System.out.println("🔥 WebSocketChatController: 채팅 메시지 수신 - roomId: " + roomId + ", 내용: " + message.content());
-            
-            // roomId를 정규화 (room_2_2 -> 22)
-            Long normalizedRoomId = normalizeRoomId(roomId);
             Long senderId = message.senderId() != null ? message.senderId() : 1L;
             
-            System.out.println("🔥 WebSocketChatController: 정규화된 roomId: " + normalizedRoomId + ", senderId: " + senderId);
+            // 보안 로깅
+            if (securityConfig.isProductionMode()) {
+                System.out.println("💬 채팅 메시지 수신 - roomId: " + securityConfig.maskRoomId(roomId) + 
+                                  ", 사용자: " + securityConfig.maskUserId(senderId));
+            } else {
+                System.out.println("🔥 WebSocketChatController: 채팅 메시지 수신 - roomId: " + roomId + ", 내용: " + message.content());
+            }
+            
+            // 1. Rate Limiting 검사
+            if (!rateLimitService.isMessageAllowed(senderId)) {
+                final String finalRoomId = roomId;
+                final Object rateLimitResponse = new Object() {
+                    public final String id = "-1";
+                    public final String roomId = finalRoomId;
+                    public final int senderId = -1;
+                    public final String senderName = "시스템";
+                    public final String content = "⏰ 메시지를 너무 빠르게 보내고 계시네요! 4초 후에 다시 시도해주세요. (분당 최대 15개)";
+                    public final String timestamp = OffsetDateTime.now(ZoneOffset.UTC).toString();
+                };
+                messagingTemplate.convertAndSend("/topic/room." + roomId, rateLimitResponse);
+                return;
+            }
+            
+            // 2. 메시지 크기 제한 검사
+            if (!rateLimitService.isMessageSizeAllowed(message.content())) {
+                final String finalRoomId = roomId;
+                final Object sizeLimitResponse = new Object() {
+                    public final String id = "-1";
+                    public final String roomId = finalRoomId;
+                    public final int senderId = -1;
+                    public final String senderName = "시스템";
+                    public final String content = "📝 메시지가 너무 길어요! 300자 이내로 작성해주세요. 음악 이야기는 간결하게! 🎵";
+                    public final String timestamp = OffsetDateTime.now(ZoneOffset.UTC).toString();
+                };
+                messagingTemplate.convertAndSend("/topic/room." + roomId, sizeLimitResponse);
+                return;
+            }
+            
+            // 보안 검증: 사용자가 해당 채팅방에 접근 권한이 있는지 확인
+            if (!secureChatRoomService.hasRoomAccess(roomId, senderId)) {
+                System.err.println("❌ 채팅방 접근 권한 없음 - roomId: " + roomId + ", userId: " + senderId);
+                
+                final String finalRoomId = roomId;
+                final Object errorResponse = new Object() {
+                    public final String id = "-1";
+                    public final String roomId = finalRoomId;
+                    public final int senderId = -1;
+                    public final String senderName = "시스템";
+                    public final String content = "🚫 이 채팅방에 참여할 수 없습니다. 새로운 매칭을 시작해보세요!";
+                    public final String timestamp = OffsetDateTime.now(ZoneOffset.UTC).toString();
+                };
+                
+                messagingTemplate.convertAndSend("/topic/room." + roomId, errorResponse);
+                return;
+            }
+            
+            // 채팅방 활동 업데이트 및 연장 확인
+            boolean wasExtended = secureChatRoomService.updateRoomActivityWithExtensionCheck(roomId);
+            
+            // 만료 임박 상태에서 연장된 경우 알림 전송
+            if (wasExtended) {
+                expiryNotificationService.sendRoomExtensionNotification(roomId);
+            }
+            
+            // UUID roomId를 직접 해시하여 DB ID로 사용
+            Long dbRoomId = (long) Math.abs(roomId.hashCode());
+            
+            System.out.println("🔥 WebSocketChatController: UUID roomId: " + roomId + ", DB roomId: " + dbRoomId + ", senderId: " + senderId);
             
             // 메시지 저장
-            var savedMessage = chatMessageService.saveText(normalizedRoomId, senderId, message.content());
+            var savedMessage = chatMessageService.saveText(dbRoomId, senderId, message.content());
             
             // 사용자 이름 조회
             String userName = userService.findUserById(senderId)
@@ -53,7 +123,7 @@ public class WebSocketChatController {
             System.out.println("🔥 WebSocketChatController: 사용자 이름: " + userName);
             
             // 프론트엔드 ChatMessage 인터페이스와 일치하는 응답 생성
-            final String finalRoomId = normalizedRoomId.toString();
+            final String finalRoomId = roomId; // UUID 원본 사용
             final String finalUserName = userName;
             final Object response = new Object() {
                 public final String id = savedMessage.id().toString();
@@ -67,19 +137,30 @@ public class WebSocketChatController {
             };
             
             System.out.println("🔥 WebSocketChatController: 응답 생성 완료, 브로드캐스트 시작");
-            return response;
+            
+            // 명시적으로 채팅방 토픽에 브로드캐스트 (원본 roomId 사용)
+            String broadcastTopic = "/topic/room." + roomId;
+            messagingTemplate.convertAndSend(broadcastTopic, response);
+            System.out.println("✅ 메시지 브로드캐스트 완료: " + broadcastTopic);
+            
+            // UUID roomId 사용으로 정규화 불필요
             
         } catch (Exception e) {
+            System.err.println("❌ WebSocketChatController: 메시지 전송 실패 - " + e.getMessage());
+            e.printStackTrace();
+            
             // 에러 메시지 전송
             final String finalRoomId = roomId;
-            return new Object() {
+            final Object errorResponse = new Object() {
                 public final String id = "-1";
                 public final String roomId = finalRoomId;
                 public final int senderId = -1;
-                public final String senderName = "System";
+                public final String senderName = "시스템";
                 public final String content = "메시지 전송 실패: " + e.getMessage();
                 public final String timestamp = OffsetDateTime.now(ZoneOffset.UTC).toString();
             };
+            
+            messagingTemplate.convertAndSend("/topic/room." + roomId, errorResponse);
         }
     }
 
@@ -87,23 +168,24 @@ public class WebSocketChatController {
      * 사용자가 채팅방에 입장했을 때
      */
     @MessageMapping("/chat.addUser/{roomId}")
-    @SendTo("/topic/room.{roomId}")
-    public ChatMessageResponse addUser(@DestinationVariable String roomId,
-                                     @Payload ChatMessageCreateRequest message) {
+    public void addUser(@DestinationVariable String roomId,
+                       @Payload ChatMessageCreateRequest message) {
         try {
             Long senderId = message.senderId() != null ? message.senderId() : 1L;
             String username = message.content() != null ? message.content() : "사용자#" + senderId;
             
-            return new ChatMessageResponse(
+            ChatMessageResponse response = new ChatMessageResponse(
                 -1L,
-                normalizeRoomId(roomId),
+                (long) Math.abs(roomId.hashCode()), // UUID를 DB ID로 변환
                 senderId,
                 username + "님이 채팅방에 입장했습니다.",
                 OffsetDateTime.now(ZoneOffset.UTC),
                 "SYSTEM"
             );
+            
+            messagingTemplate.convertAndSend("/topic/room." + roomId, response);
         } catch (Exception e) {
-            return new ChatMessageResponse(
+            ChatMessageResponse errorResponse = new ChatMessageResponse(
                 -1L,
                 -1L,
                 -1L,
@@ -111,6 +193,8 @@ public class WebSocketChatController {
                 OffsetDateTime.now(ZoneOffset.UTC),
                 "ERROR"
             );
+            
+            messagingTemplate.convertAndSend("/topic/room." + roomId, errorResponse);
         }
     }
 
@@ -118,23 +202,24 @@ public class WebSocketChatController {
      * 사용자가 채팅방에서 나갔을 때
      */
     @MessageMapping("/chat.leaveUser/{roomId}")
-    @SendTo("/topic/room.{roomId}")
-    public ChatMessageResponse leaveUser(@DestinationVariable String roomId,
-                                       @Payload ChatMessageCreateRequest message) {
+    public void leaveUser(@DestinationVariable String roomId,
+                         @Payload ChatMessageCreateRequest message) {
         try {
             Long senderId = message.senderId() != null ? message.senderId() : 1L;
             String username = message.content() != null ? message.content() : "사용자#" + senderId;
             
-            return new ChatMessageResponse(
+            ChatMessageResponse response = new ChatMessageResponse(
                 -1L,
-                normalizeRoomId(roomId),
+                (long) Math.abs(roomId.hashCode()), // UUID를 DB ID로 변환
                 senderId,
                 username + "님이 채팅방에서 나갔습니다.",
                 OffsetDateTime.now(ZoneOffset.UTC),
                 "SYSTEM"
             );
+            
+            messagingTemplate.convertAndSend("/topic/room." + roomId, response);
         } catch (Exception e) {
-            return new ChatMessageResponse(
+            ChatMessageResponse errorResponse = new ChatMessageResponse(
                 -1L,
                 -1L,
                 -1L,
@@ -142,6 +227,8 @@ public class WebSocketChatController {
                 OffsetDateTime.now(ZoneOffset.UTC),
                 "ERROR"
             );
+            
+            messagingTemplate.convertAndSend("/topic/room." + roomId, errorResponse);
         }
     }
 
@@ -186,13 +273,13 @@ public class WebSocketChatController {
                 "private_" + targetId + "_" + senderId;
                 
             // 메시지 저장
-            Long normalizedRoomId = normalizeRoomId(privateRoomId);
-            var savedMessage = chatMessageService.saveText(normalizedRoomId, senderId, message.content());
+            Long dbRoomId = (long) Math.abs(privateRoomId.hashCode());
+            var savedMessage = chatMessageService.saveText(dbRoomId, senderId, message.content());
             
             // 수신자에게 메시지 전송
             ChatMessageResponse response = new ChatMessageResponse(
                 savedMessage.id(),
-                normalizedRoomId,
+                dbRoomId,
                 savedMessage.senderId(),
                 savedMessage.content(),
                 OffsetDateTime.ofInstant(savedMessage.createdAt(), ZoneOffset.UTC),
@@ -225,24 +312,4 @@ public class WebSocketChatController {
         }
     }
 
-    /**
-     * roomId 정규화 헬퍼 메소드
-     */
-    private Long normalizeRoomId(String roomId) {
-        if (roomId == null) return 1L;
-        
-        // "room_1_2" -> "12" 또는 해시값으로 변환
-        String digits = roomId.replaceAll("\\D", "");
-        if (!digits.isEmpty()) {
-            try {
-                return Long.parseLong(digits.length() > 10 ? digits.substring(0, 10) : digits);
-            } catch (NumberFormatException e) {
-                // 파싱 실패시 해시값 사용
-                return (long) Math.abs(roomId.hashCode());
-            }
-        }
-        
-        // 숫자가 없으면 해시값 사용
-        return (long) Math.abs(roomId.hashCode());
-    }
 }

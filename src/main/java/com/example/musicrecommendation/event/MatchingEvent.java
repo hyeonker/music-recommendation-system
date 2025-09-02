@@ -7,12 +7,12 @@ import org.springframework.context.ApplicationEvent;
 public class MatchingEvent extends ApplicationEvent {
     private final Long userId1;
     private final Long userId2;
-    private final Long roomId;
+    private final String roomId; // UUID 기반 roomId 사용
     private final String status; // "SUCCESS" or "FAILED"
     private final String message;
     private final Object additionalData;
 
-    public MatchingEvent(Object source, Long userId1, Long userId2, Long roomId, 
+    public MatchingEvent(Object source, Long userId1, Long userId2, String roomId, 
                         String status, String message, Object additionalData) {
         super(source);
         this.userId1 = userId1;

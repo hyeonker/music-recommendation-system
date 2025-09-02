@@ -216,59 +216,131 @@ export class WebSocketManager {
         this.subscriptions.set('system', systemSub);
     }
 
-    // 채팅방 구독
+    // 채팅방 구독 - 재시도 메커니즘 추가
     public subscribeToChatRoom(roomId: string): void {
-        if (!this.client || !this.isConnected) {
-            console.warn('⚠️ WebSocket이 연결되지 않았습니다 - 채팅방 구독 불가');
-            return;
-        }
-
-        console.log('🏠 채팅방 구독 시작:', roomId);
-
-        // 이미 구독 중인 채팅방이 있다면 구독 해제
-        if (this.subscriptions.has('chat')) {
-            console.log('📤 기존 채팅방 구독 해제');
-            this.subscriptions.get('chat').unsubscribe();
-        }
-
-        // 새 채팅방 구독
-        const chatSub = this.client.subscribe(`/topic/room.${roomId}`, (message: IMessage) => {
-            try {
-                console.log('💬 채팅 메시지 수신:', message.body);
-                const chatMessage: ChatMessage = JSON.parse(message.body);
-                
-                // SocketContext로 전달
-                this.onChatMessageHandler?.(chatMessage);
-            } catch (error) {
-                console.error('채팅 메시지 파싱 오류:', error);
+        const attemptSubscribe = (attempt: number = 1): void => {
+            if (!this.client) {
+                console.warn('⚠️ WebSocket 클라이언트가 없음 - 채팅방 구독 불가');
+                return;
             }
-        });
-        this.subscriptions.set('chat', chatSub);
-        console.log(`✅ 채팅방 구독 완료: /topic/room.${roomId}`);
+            
+            if (!this.isConnected) {
+                if (attempt <= 3) {
+                    console.log(`🔄 WebSocket 연결 대기 중... (${attempt}/3)`);
+                    setTimeout(() => attemptSubscribe(attempt + 1), 1000 * attempt);
+                } else {
+                    console.error('❌ WebSocket 연결 실패 - 채팅방 구독 중단');
+                }
+                return;
+            }
+
+            console.log('🏠 채팅방 구독 시작:', roomId, `(attempt: ${attempt})`);
+
+            // 이미 구독 중인 채팅방이 있다면 구독 해제
+            if (this.subscriptions.has('chat')) {
+                console.log('📤 기존 채팅방 구독 해제');
+                try {
+                    this.subscriptions.get('chat').unsubscribe();
+                } catch (e) {
+                    console.warn('기존 구독 해제 오류:', e);
+                }
+            }
+            
+            // 정규화된 채팅방 구독도 해제
+            if (this.subscriptions.has('chat_normalized')) {
+                console.log('📤 기존 정규화 채팅방 구독 해제');
+                try {
+                    this.subscriptions.get('chat_normalized').unsubscribe();
+                } catch (e) {
+                    console.warn('기존 정규화 구독 해제 오류:', e);
+                }
+            }
+
+            // 새 채팅방 구독 - 원본 roomId와 정규화 둘 다 구독
+            try {
+                const subscriptionTopic = `/topic/room.${roomId}`;
+                console.log(`🔄 채팅방 구독 시도: ${subscriptionTopic}`);
+                
+                const chatSub = this.client.subscribe(subscriptionTopic, (message: IMessage) => {
+                    try {
+                        console.log(`💬 채팅 메시지 수신 [${subscriptionTopic}]:`, message.body);
+                        const chatMessage: ChatMessage = JSON.parse(message.body);
+                        
+                        // SocketContext로 전달
+                        this.onChatMessageHandler?.(chatMessage);
+                    } catch (error) {
+                        console.error(`채팅 메시지 파싱 오류 [${subscriptionTopic}]:`, error);
+                    }
+                });
+                
+                this.subscriptions.set('chat', chatSub);
+                console.log(`✅ 채팅방 구독 완료: ${subscriptionTopic}`);
+                
+                // 정규화된 roomId로도 추가 구독 (호환성)
+                const normalizedRoomId = this.normalizeRoomId(roomId);
+                if (normalizedRoomId !== roomId) {
+                    const normalizedTopic = `/topic/room.${normalizedRoomId}`;
+                    console.log(`🔄 정규화 채팅방 구독 시도: ${normalizedTopic}`);
+                    
+                    const normalizedSub = this.client.subscribe(normalizedTopic, (message: IMessage) => {
+                        try {
+                            console.log(`💬 정규화 메시지 수신 [${normalizedTopic}]:`, message.body);
+                            const chatMessage: ChatMessage = JSON.parse(message.body);
+                            this.onChatMessageHandler?.(chatMessage);
+                        } catch (error) {
+                            console.error(`정규화 메시지 파싱 오류 [${normalizedTopic}]:`, error);
+                        }
+                    });
+                    
+                    this.subscriptions.set('chat_normalized', normalizedSub);
+                    console.log(`✅ 정규화 채팅방 구독 완료: ${normalizedTopic}`);
+                }
+                
+            } catch (error) {
+                console.error('채팅방 구독 오류:', error);
+                if (attempt <= 2) {
+                    setTimeout(() => attemptSubscribe(attempt + 1), 2000);
+                }
+            }
+        };
+        
+        attemptSubscribe();
     }
 
-    // 채팅 메시지 전송
-    public sendChatMessage(roomId: string, content: string, senderId: number, senderName: string): void {
-        if (!this.client || !this.isConnected) {
-            console.warn('WebSocket이 연결되지 않았습니다');
-            return;
-        }
+    // 채팅 메시지 전송 - 안정성 개선
+    public sendChatMessage(roomId: string, content: string, senderId?: number, senderName?: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (!this.client || !this.isConnected) {
+                const error = 'WebSocket이 연결되지 않았습니다';
+                console.warn(error);
+                reject(new Error(error));
+                return;
+            }
 
-        const message = {
-            roomId,
-            senderId,
-            senderName,
-            content,
-            timestamp: new Date().toISOString()
-        };
+            try {
+                const payload = {
+                    senderId: senderId || parseInt(this.currentUserId),
+                    content: content,
+                    type: 'TEXT'
+                };
+                
+                console.log('🚀 WebSocket 메시지 전송:', { 
+                    destination: `/app/chat.sendMessage/${roomId}`,
+                    payload 
+                });
 
-        this.client.publish({
-            destination: `/app/chat.sendMessage/${roomId}`,
-            body: JSON.stringify({
-                senderId: senderId,
-                content: content,
-                type: 'TEXT'
-            })
+                this.client.publish({
+                    destination: `/app/chat.sendMessage/${roomId}`,
+                    body: JSON.stringify(payload)
+                });
+                
+                // 성공적으로 전송됨
+                resolve();
+                
+            } catch (error) {
+                console.error('메시지 전송 오류:', error);
+                reject(error);
+            }
         });
     }
 
@@ -348,6 +420,13 @@ export class WebSocketManager {
 
     public onChatMessage(handler: (message: ChatMessage) => void): void {
         this.onChatMessageHandler = handler;
+    }
+
+    // roomId 정규화 (Chat.tsx와 동일한 로직)
+    private normalizeRoomId(roomIdLike: string): string {
+        const s = String(roomIdLike);
+        const digits = s.replace(/\D+/g, '');
+        return digits || s; // 숫자 없으면 원문 반환
     }
 
     // 상태 확인

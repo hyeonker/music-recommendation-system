@@ -1,6 +1,6 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { Music, Users, Heart, TrendingUp, Play, Clock, Star, Headphones } from 'lucide-react';
+import { Music, Users, Heart, TrendingUp, Play, Clock, Star, Headphones, RefreshCw, AlertCircle } from 'lucide-react';
 import api from '../api/client';
 
 interface Recommendation {
@@ -20,6 +20,30 @@ interface DashboardStats {
     favoriteGenres: string[];
     listeningTime: number; // minutes
 }
+
+interface RefreshLimits {
+    daily: number;
+    hourly: number;
+    cooldown: number; // seconds
+}
+
+interface RefreshState {
+    dailyCount: number;
+    hourlyCount: number;
+    lastRefresh: number;
+    nextAllowed: number;
+}
+
+const REFRESH_LIMITS: RefreshLimits = {
+    daily: 10,
+    hourly: 3,
+    cooldown: 30
+};
+
+const STORAGE_KEYS = {
+    REFRESH_STATE: 'music_recommendations_refresh_state',
+    CACHED_RECS: 'music_recommendations_cache'
+};
 
 const FALLBACK_RECS: Recommendation[] = [
     {
@@ -61,7 +85,10 @@ const Dashboard: React.FC = () => {
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [systemStatus, setSystemStatus] = useState<any>(null);
     const [loading, setLoading] = useState(true);
-    const [likedTracks, setLikedTracks] = useState<Set<string | number>>(new Set()); // 좋아요한 트랙들
+    const [likedTracks, setLikedTracks] = useState<Set<string | number>>(new Set());
+    const [refreshState, setRefreshState] = useState<RefreshState>({ dailyCount: 0, hourlyCount: 0, lastRefresh: 0, nextAllowed: 0 });
+    const [refreshLoading, setRefreshLoading] = useState(false);
+    const [showRefreshStatus, setShowRefreshStatus] = useState(false);
 
     const imageFallback = (e: React.SyntheticEvent<HTMLImageElement>, text: string) => {
         const img = e.currentTarget;
@@ -126,17 +153,243 @@ const Dashboard: React.FC = () => {
         }
     };
 
-    // 사용자의 좋아요 목록 불러오기
-    const loadUserLikes = async (userId: number) => {
-        try {
-            const response = await api.get(`/api/likes/user/${userId}`);
-            const likes = response.data || [];
-            const likedIds = likes.map((like: any) => like.songId || like.song?.id).filter(Boolean);
-            setLikedTracks(new Set(likedIds));
-        } catch (error) {
-            console.warn('좋아요 목록 불러오기 실패:', error);
-            // 에러가 나도 페이지는 정상 작동하도록
+    // 새로고침 상태 관리
+    const initializeRefreshState = () => {
+        const stored = localStorage.getItem(STORAGE_KEYS.REFRESH_STATE);
+        if (stored) {
+            try {
+                const parsed: RefreshState = JSON.parse(stored);
+                const now = Date.now();
+                const today = new Date().toDateString();
+                const storedDate = new Date(parsed.lastRefresh).toDateString();
+                const currentHour = new Date().getHours();
+                const storedHour = new Date(parsed.lastRefresh).getHours();
+                
+                // 날짜가 바뀌면 일일 카운트 리셋
+                if (today !== storedDate) {
+                    parsed.dailyCount = 0;
+                }
+                
+                // 시간이 바뀌면 시간당 카운트 리셋
+                if (currentHour !== storedHour) {
+                    parsed.hourlyCount = 0;
+                }
+                
+                setRefreshState(parsed);
+                return parsed;
+            } catch {
+                // 파싱 실패시 초기값 반환
+            }
         }
+        
+        const initial: RefreshState = { dailyCount: 0, hourlyCount: 0, lastRefresh: 0, nextAllowed: 0 };
+        setRefreshState(initial);
+        return initial;
+    };
+
+    const updateRefreshState = (newState: RefreshState) => {
+        setRefreshState(newState);
+        localStorage.setItem(STORAGE_KEYS.REFRESH_STATE, JSON.stringify(newState));
+    };
+
+    const canRefresh = (state: RefreshState): { allowed: boolean; reason?: string; waitTime?: number } => {
+        const now = Date.now();
+        
+        // 쿨다운 체크
+        if (now < state.nextAllowed) {
+            const waitSeconds = Math.ceil((state.nextAllowed - now) / 1000);
+            return { allowed: false, reason: 'cooldown', waitTime: waitSeconds };
+        }
+        
+        // 일일 제한 체크
+        if (state.dailyCount >= REFRESH_LIMITS.daily) {
+            return { allowed: false, reason: 'daily_limit' };
+        }
+        
+        // 시간당 제한 체크
+        if (state.hourlyCount >= REFRESH_LIMITS.hourly) {
+            return { allowed: false, reason: 'hourly_limit' };
+        }
+        
+        return { allowed: true };
+    };
+
+    // 캐시된 추천 음악 로드 (새로고침 시에는 무시)
+    const loadCachedRecommendations = (isRefresh: boolean = false) => {
+        // 새로고침일 때는 캐시 무시하고 새로운 데이터 로드
+        if (isRefresh) {
+            localStorage.removeItem(STORAGE_KEYS.CACHED_RECS);
+            return false;
+        }
+        
+        const cached = localStorage.getItem(STORAGE_KEYS.CACHED_RECS);
+        if (cached) {
+            try {
+                const { data, timestamp }: { data: Recommendation[], timestamp: number } = JSON.parse(cached);
+                // 캐시 유효 시간을 10분으로 단축 (더 자주 새로운 추천)
+                if (Date.now() - timestamp < 10 * 60 * 1000) {
+                    setRecommendations(data);
+                    return true;
+                }
+            } catch {
+                localStorage.removeItem(STORAGE_KEYS.CACHED_RECS);
+            }
+        }
+        return false;
+    };
+
+    // 추천 음악 캐시 저장
+    const cacheRecommendations = (recs: Recommendation[]) => {
+        const cacheData = {
+            data: recs,
+            timestamp: Date.now()
+        };
+        localStorage.setItem(STORAGE_KEYS.CACHED_RECS, JSON.stringify(cacheData));
+    };
+
+    const loadRecommendationsAsync = async (isRefresh: boolean = false) => {
+        if (isRefresh) {
+            setRefreshLoading(true);
+        }
+        
+        try {
+            // 사용자 ID 가져오기
+            let userId = 1;
+            try {
+                const me = await api.get('/api/auth/me');
+                if (me?.data?.authenticated && me?.data?.user?.id) {
+                    userId = Number(me.data.user.id);
+                }
+            } catch {}
+
+            // 좋아요 목록 로드
+            let currentLikedTracks = new Set<string | number>();
+            try {
+                const response = await api.get(`/api/likes/user/${userId}`);
+                const likes = response.data?.content || response.data || [];
+                const likedIds = likes.map((like: any) => like.externalId || like.songId || like.song?.id).filter(Boolean);
+                currentLikedTracks = new Set<string | number>(likedIds);
+                setLikedTracks(currentLikedTracks);
+            } catch (error) {
+                console.warn('좋아요 목록 불러오기 실패:', error);
+            }
+
+            // Progressive Loading - 5개씩 단계별 로딩
+            const loadBatch = async (offset: number, limit: number) => {
+                try {
+                    const rec = await api.get(`/api/recommendations/user/${userId}?offset=${offset}&limit=${limit}`);
+                    return Array.isArray(rec.data) ? rec.data : [];
+                } catch {
+                    return [];
+                }
+            };
+
+            let allRecs: Recommendation[] = [];
+            
+            // 첫 번째 배치 (즉시 표시)
+            const firstBatch = await loadBatch(0, 5);
+            allRecs = [...firstBatch];
+            
+            if (allRecs.length > 0) {
+                const filteredFirst = allRecs.filter(track => !currentLikedTracks.has(track.id));
+                setRecommendations(prev => isRefresh ? filteredFirst : [...prev, ...filteredFirst]);
+            }
+            
+            // 두 번째 배치 (지연 로딩)
+            setTimeout(async () => {
+                const secondBatch = await loadBatch(5, 5);
+                if (secondBatch.length > 0) {
+                    allRecs = [...allRecs, ...secondBatch];
+                    const filteredSecond = secondBatch.filter(track => !currentLikedTracks.has(track.id));
+                    setRecommendations(prev => [...prev, ...filteredSecond]);
+                }
+            }, 500);
+            
+            // 필터링 후 부족하면 FALLBACK_RECS에서 보충
+            const filteredRecs = allRecs.filter(track => !currentLikedTracks.has(track.id));
+            let finalRecs = filteredRecs.slice(0, 8);
+            
+            if (finalRecs.length < 4) {
+                const fallbackFiltered = FALLBACK_RECS.filter(track => !currentLikedTracks.has(track.id));
+                const needed = Math.max(4 - finalRecs.length, 0);
+                finalRecs = [...finalRecs, ...fallbackFiltered.slice(0, needed)];
+            }
+            
+            setRecommendations(finalRecs.slice(0, 8));
+            
+            // 캐시 저장
+            if (finalRecs.length > 0) {
+                cacheRecommendations(finalRecs);
+            }
+            
+        } catch (error) {
+            console.error('추천 음악 로딩 실패:', error);
+            
+            // Error Fallback - API 실패 시 인기 차트로 대체
+            const fallbackFiltered = FALLBACK_RECS.filter(track => !likedTracks.has(track.id));
+            setRecommendations(fallbackFiltered.slice(0, 4));
+        } finally {
+            if (isRefresh) {
+                setRefreshLoading(false);
+            }
+        }
+    };
+
+    const handleRefresh = async () => {
+        const currentState = refreshState;
+        const refreshCheck = canRefresh(currentState);
+        
+        if (!refreshCheck.allowed) {
+            let message = '';
+            switch (refreshCheck.reason) {
+                case 'cooldown':
+                    message = `⏰ ${refreshCheck.waitTime}초 후 새로고침 가능해요!`;
+                    break;
+                case 'daily_limit':
+                    message = `📅 오늘의 새로고침을 모두 사용했어요! (${REFRESH_LIMITS.daily}회)\n내일 새벽에 자동으로 새로운 추천이 준비될 예정이에요! 🎵`;
+                    break;
+                case 'hourly_limit':
+                    message = `🕐 시간당 새로고침 한도를 초과했어요! (${REFRESH_LIMITS.hourly}회)\n1시간 후에 다시 시도해주세요!`;
+                    break;
+            }
+            alert(message);
+            setShowRefreshStatus(true);
+            setTimeout(() => setShowRefreshStatus(false), 5000);
+            return;
+        }
+        
+        const now = Date.now();
+        const newState: RefreshState = {
+            ...currentState,
+            dailyCount: currentState.dailyCount + 1,
+            hourlyCount: currentState.hourlyCount + 1,
+            lastRefresh: now,
+            nextAllowed: now + (REFRESH_LIMITS.cooldown * 1000)
+        };
+        
+        updateRefreshState(newState);
+        // 새로고침 시 캐시 무시하고 새로운 데이터 로드
+        await loadRecommendationsAsync(true);
+    };
+
+    const getRefreshButtonText = () => {
+        const remaining = REFRESH_LIMITS.daily - refreshState.dailyCount;
+        const hourlyRemaining = REFRESH_LIMITS.hourly - refreshState.hourlyCount;
+        const nextAllowed = Math.max(0, Math.ceil((refreshState.nextAllowed - Date.now()) / 1000));
+        
+        if (nextAllowed > 0) {
+            return `⏰ ${nextAllowed}초 후 새로고침 가능`;
+        }
+        
+        if (remaining <= 0) {
+            return '📅 오늘 새로고침 완료';
+        }
+        
+        if (hourlyRemaining <= 0) {
+            return '🕐 1시간 후 새로고침 가능';
+        }
+        
+        return `🔄 새로고침 (오늘 ${remaining}/${REFRESH_LIMITS.daily}회 남음)`;
     };
 
     const loadDashboardData = useCallback(async () => {
@@ -172,39 +425,12 @@ const Dashboard: React.FC = () => {
                 matchStatus = null;
             }
 
-            // 4) 사용자 좋아요 목록 먼저 불러오기 (추천 필터링을 위해)
-            let currentLikedTracks = new Set<string | number>();
-            try {
-                const response = await api.get(`/api/likes/user/${userId}`);
-                const likes = response.data?.content || response.data || [];
-                const likedIds = likes.map((like: any) => like.externalId || like.songId || like.song?.id).filter(Boolean);
-                currentLikedTracks = new Set<string | number>(likedIds);
-                setLikedTracks(currentLikedTracks);
-            } catch (error) {
-                console.warn('좋아요 목록 불러오기 실패:', error);
-            }
-
-            // 5) 추천 목록 (좋아요한 곡 제외)
-            try {
-                const rec = await api.get(`/api/recommendations/user/${userId}`);
-                const allRecs = Array.isArray(rec.data) ? rec.data : FALLBACK_RECS;
-                
-                // 좋아요한 곡들 제외하고 필터링
-                const filteredRecs = allRecs.filter(track => !currentLikedTracks.has(track.id));
-                
-                // 필터링 후 부족하면 FALLBACK_RECS에서 보충
-                let finalRecs = filteredRecs.slice(0, 4);
-                if (finalRecs.length < 4) {
-                    const fallbackFiltered = FALLBACK_RECS.filter(track => !currentLikedTracks.has(track.id));
-                    const needed = 4 - finalRecs.length;
-                    finalRecs = [...finalRecs, ...fallbackFiltered.slice(0, needed)];
-                }
-                
-                setRecommendations(finalRecs);
-            } catch {
-                // 에러 시에도 좋아요한 곡 제외
-                const fallbackFiltered = FALLBACK_RECS.filter(track => !currentLikedTracks.has(track.id));
-                setRecommendations(fallbackFiltered.slice(0, 4));
+            // 캐시된 추천 음악 먼저 로드 (즉시 표시)
+            const hasCached = loadCachedRecommendations(false);
+            
+            if (!hasCached) {
+                // 캐시가 없으면 비동기로 로드
+                setTimeout(() => loadRecommendationsAsync(false), 100);
             }
 
             // 5) 통계 계산 (setState 비동기 고려 없이 로컬 sys 사용)
@@ -227,15 +453,30 @@ const Dashboard: React.FC = () => {
                 favoriteGenres: ['K-Pop', 'Pop', 'Rock'],
                 listeningTime: 847,
             });
-            setRecommendations(FALLBACK_RECS.slice(0, 1));
+            // 전체 실패 시에도 캐시 시도
+            if (!loadCachedRecommendations(false)) {
+                setRecommendations(FALLBACK_RECS.slice(0, 4));
+            }
         } finally {
             setLoading(false);
         }
     }, []);
 
     useEffect(() => {
+        initializeRefreshState();
         loadDashboardData();
     }, [loadDashboardData]);
+    
+    // 실시간 쿨다운 타이머
+    useEffect(() => {
+        if (refreshState.nextAllowed > Date.now()) {
+            const interval = setInterval(() => {
+                setRefreshState(prev => ({ ...prev })); // 리렌더링 트리거
+            }, 1000);
+            
+            return () => clearInterval(interval);
+        }
+    }, [refreshState.nextAllowed]);
 
     if (loading) {
         return (
@@ -325,15 +566,57 @@ const Dashboard: React.FC = () => {
                             <Star className="w-6 h-6 text-yellow-400" />
                             <span>오늘의 추천 음악</span>
                         </h2>
-                        <button
-                            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center space-x-2"
-                            onClick={loadDashboardData}
-                        >
-                            <TrendingUp className="w-4 h-4" />
-                            <span>새로고침</span>
-                        </button>
+                        <div className="flex items-center space-x-3">
+                            {showRefreshStatus && (
+                                <div className="bg-amber-500/20 text-amber-200 px-3 py-1 rounded-lg text-sm flex items-center space-x-1">
+                                    <AlertCircle className="w-4 h-4" />
+                                    <span>새로고침 제한</span>
+                                </div>
+                            )}
+                            <button
+                                className={`px-4 py-2 rounded-lg transition-all duration-200 flex items-center space-x-2 ${
+                                    canRefresh(refreshState).allowed 
+                                        ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                                        : 'bg-gray-600 text-gray-300 cursor-not-allowed'
+                                }`}
+                                onClick={handleRefresh}
+                                disabled={!canRefresh(refreshState).allowed || refreshLoading}
+                            >
+                                {refreshLoading ? (
+                                    <>
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                                        <span>✨ 새로운 추천 로딩중...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <RefreshCw className="w-4 h-4" />
+                                        <span className="text-sm">{getRefreshButtonText()}</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {/* 새로고침 정보 */}
+                    <div className="mb-4 text-center">
+                        <div className="inline-flex items-center space-x-4 bg-white/5 rounded-lg px-4 py-2 text-sm text-blue-200">
+                            <span>📊 일일: {refreshState.dailyCount}/{REFRESH_LIMITS.daily}</span>
+                            <span>⏱️ 시간당: {refreshState.hourlyCount}/{REFRESH_LIMITS.hourly}</span>
+                            {refreshState.lastRefresh > 0 && (
+                                <span>🕐 마지막: {new Date(refreshState.lastRefresh).toLocaleTimeString()}</span>
+                            )}
+                        </div>
                     </div>
 
+                    {refreshLoading && (
+                        <div className="mb-6 text-center">
+                            <div className="inline-flex items-center space-x-2 bg-purple-500/20 text-purple-200 px-4 py-2 rounded-lg">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-200" />
+                                <span>새로운 음악을 찾고 있어요...</span>
+                            </div>
+                        </div>
+                    )}
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         {recommendations.map((track) => (
                             <div

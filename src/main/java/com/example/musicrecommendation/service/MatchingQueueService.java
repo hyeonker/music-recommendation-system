@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class MatchingQueueService {
 
     private final RealtimeMatchingService realtimeMatchingService;
-    private final ChatRoomService chatRoomService;
+    private final SecureChatRoomService secureChatRoomService;
     private final MusicMatchingService musicMatchingService;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -34,11 +34,11 @@ public class MatchingQueueService {
     private final Map<Long, Long> matchedUsers = new ConcurrentHashMap<>();
 
     public MatchingQueueService(RealtimeMatchingService realtimeMatchingService,
-                                ChatRoomService chatRoomService,
+                                SecureChatRoomService secureChatRoomService,
                                 MusicMatchingService musicMatchingService,
                                 org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.realtimeMatchingService = realtimeMatchingService;
-        this.chatRoomService = chatRoomService;
+        this.secureChatRoomService = secureChatRoomService;
         this.musicMatchingService = musicMatchingService;
         this.eventPublisher = eventPublisher;
     }
@@ -74,7 +74,10 @@ public class MatchingQueueService {
                 public final String message = "이미 매칭된 상태입니다";
                 public final String status = "ALREADY_MATCHED";
                 public final Long currentMatchId = matchedUserId;
-                public final String chatRoomId = "room_" + Math.min(userId, matchedUserId) + "_" + Math.max(userId, matchedUserId);
+                // 보안 강화된 채팅방 생성
+                private final SecureChatRoomService.ChatRoomCreationResult roomResult = 
+                    secureChatRoomService.createSecureChatRoom(userId, matchedUserId);
+                public final String chatRoomId = roomResult.getRoomId();
             };
         }
 
@@ -203,8 +206,10 @@ public class MatchingQueueService {
             System.out.println("사용자 " + user2Id + " -> " + user1Id + " 매칭 맵에 추가");
             System.out.println("현재 matchedUsers 맵: " + matchedUsers);
 
-            // 채팅방 생성
-            String chatRoomId = chatRoomService.createChatRoom(user1Id, user2Id);
+            // 보안 채팅방 생성 (UUID 기반)
+            SecureChatRoomService.ChatRoomCreationResult chatRoomResult = 
+                secureChatRoomService.createSecureChatRoom(user1Id, user2Id);
+            String chatRoomId = chatRoomResult.getRoomId();
 
             // 실제 매칭 정보 조회
             UserMatch actualMatch = getOrCreateMatch(user1Id, user2Id);
@@ -339,9 +344,11 @@ public class MatchingQueueService {
         if (matchedUserId != null) {
             matchedUsers.remove(matchedUserId);
 
-            // 채팅방 비활성화
-            String chatRoomId = "room_" + Math.min(userId, matchedUserId) + "_" + Math.max(userId, matchedUserId);
-            chatRoomService.deactivateChatRoom(chatRoomId);
+            // UUID 기반 보안 채팅방은 자동 만료되므로 별도 비활성화 불필요
+            String chatRoomId = secureChatRoomService.getUserActiveRoom(userId);
+            if (chatRoomId != null) {
+                log.info("매칭 종료 - 채팅방 {}는 1시간 후 자동 만료됩니다", chatRoomId);
+            }
 
             // 상대방에게 매칭 종료 알림
             realtimeMatchingService.sendPersonalNotification(
@@ -391,7 +398,7 @@ public class MatchingQueueService {
         
         if (matchedUsers.containsKey(userId)) {
             Long matchedUserId = matchedUsers.get(userId);
-            String chatRoomId = "room_" + Math.min(userId, matchedUserId) + "_" + Math.max(userId, matchedUserId);
+            String chatRoomId = secureChatRoomService.getUserActiveRoom(userId);
             System.out.println("사용자 " + userId + "는 " + matchedUserId + "와 매칭됨 (MATCHED 상태)");
 
             return new Object() {
@@ -474,7 +481,7 @@ public class MatchingQueueService {
                 this, 
                 userId, 
                 matchedUserId, 
-                Long.parseLong(chatRoomId.replaceAll("\\D", "")), 
+                chatRoomId, // 원본 UUID roomId 사용
                 "SUCCESS", 
                 "매칭 성공", 
                 additionalData

@@ -44,10 +44,31 @@ const Matching: React.FC = () => {
             } catch {
                 // fallback: keep 1
             }
+            
+            // 🧹 기존 데이터 클리어 - 새로운 UUID 기반 시스템으로 완전 전환
+            clearLegacyData();
+            
             checkMatchingStatus();
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+    
+    // 기존 숫자형 roomId 및 관련 데이터 클리어
+    const clearLegacyData = () => {
+        const lastRoomId = sessionStorage.getItem('lastRoomId');
+        
+        // 기존 숫자형 roomId인 경우 클리어
+        if (lastRoomId && /^\d+$/.test(lastRoomId)) {
+            console.log('🧹 기존 숫자형 roomId 클리어:', lastRoomId);
+            sessionStorage.removeItem('lastRoomId');
+            sessionStorage.removeItem('matchedUser');
+            localStorage.removeItem('chatRoomId');
+            toast.success('새로운 보안 채팅 시스템으로 업그레이드되었습니다! 새로운 매칭을 시작하세요.', {
+                duration: 4000,
+                icon: '🔒'
+            });
+        }
+    };
 
     useEffect(() => {
         let interval: ReturnType<typeof setInterval> | undefined;
@@ -205,34 +226,57 @@ const Matching: React.FC = () => {
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    // 매칭된 사용자의 대표 배지 조회
-    const fetchMatchedUserBadge = async (userId: number) => {
+    // 매칭된 사용자가 변경될 때 배지 및 사용자 정보 로드
+    useEffect(() => {
+        if (matchedUser?.id && matchedUser.id !== userId) {
+            fetchMatchedUserInfo(matchedUser.id);
+        }
+    }, [matchedUser?.id, userId]);
+
+    // 매칭된 사용자의 실제 정보 조회 (이름 + 배지)
+    const fetchMatchedUserInfo = async (matchedUserId: number) => {
         try {
-            const { data } = await api.get(`/api/users/${userId}/representative-badge`);
-            const badge = data ? {
-                id: data.id,
-                badgeType: data.badgeType,
-                badgeName: data.badgeName,
-                description: data.description,
-                iconUrl: data.iconUrl,
-                rarity: data.rarity || 'COMMON',
-                badgeColor: data.badgeColor || '#6B7280'
+            // 1. 사용자 기본 정보 조회
+            const userResponse = await api.get(`/api/users/${matchedUserId}`);
+            const userData = userResponse.data;
+            
+            // 2. 대표 배지 조회
+            const badgeResponse = await api.get(`/api/badges/user/${matchedUserId}/representative`);
+            const badgeData = badgeResponse.data;
+            
+            const badge = badgeData ? {
+                id: badgeData.id,
+                badgeType: badgeData.badgeType,
+                badgeName: badgeData.badgeName,
+                description: badgeData.description,
+                iconUrl: badgeData.iconUrl,
+                rarity: badgeData.rarity || 'COMMON',
+                badgeColor: badgeData.badgeColor || '#6B7280'
             } : null;
+            
             setMatchedUserBadge(badge);
+            
+            // 3. 매칭된 사용자 정보 업데이트 (실제 이름으로)
+            const updatedMatchedUser = {
+                ...matchedUser,
+                name: userData.name || '음악친구',
+                realName: userData.name // 실제 이름 보존
+            };
+            setMatchedUser(updatedMatchedUser);
+            
+            // 4. 세션 스토리지에 실제 정보 저장 (채팅에서 사용)
+            const userInfoForChat = {
+                id: matchedUserId,
+                name: userData.name || '음악친구',
+                badge: badge
+            };
+            sessionStorage.setItem('matchedUser', JSON.stringify(userInfoForChat));
+            
         } catch (error) {
-            console.error(`매칭된 사용자 ${userId}의 대표 배지 조회 실패:`, error);
+            console.error(`매칭된 사용자 ${matchedUserId}의 정보 조회 실패:`, error);
             setMatchedUserBadge(null);
         }
     };
-
-    // 매칭된 사용자가 변경될 때 배지 로드
-    useEffect(() => {
-        if (matchedUser && matchedUser.id && matchingStatus === 'MATCHED') {
-            fetchMatchedUserBadge(Number(matchedUser.id));
-        } else {
-            setMatchedUserBadge(null);
-        }
-    }, [matchedUser, matchingStatus]);
 
     return (
         <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
