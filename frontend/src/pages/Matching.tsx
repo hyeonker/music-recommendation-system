@@ -8,6 +8,16 @@ import api from '../api/client';
 
 type MatchStatus = 'IDLE' | 'WAITING' | 'MATCHED';
 
+type RepresentativeBadge = {
+    id: number;
+    badgeType: string;
+    badgeName: string;
+    description: string;
+    iconUrl?: string;
+    rarity: string;
+    badgeColor: string;
+};
+
 const Matching: React.FC = () => {
     const [matchingStatus, setMatchingStatus] = useState<MatchStatus>('IDLE');
     const [matchedUser, setMatchedUser] = useState<any>(null);
@@ -20,6 +30,9 @@ const Matching: React.FC = () => {
 
     // 로그인 사용자 ID (있으면 /api/auth/me 사용, 없으면 1)
     const [userId, setUserId] = useState<number>(1);
+    
+    // 매칭된 사용자의 대표 배지
+    const [matchedUserBadge, setMatchedUserBadge] = useState<RepresentativeBadge | null>(null);
 
     useEffect(() => {
         (async () => {
@@ -49,8 +62,21 @@ const Matching: React.FC = () => {
     // WebSocket 커스텀 이벤트 리스너
     useEffect(() => {
         const handleMatchingSuccess = (event: any) => {
-            const roomId = event?.detail?.roomId;
-            const mUser = event?.detail?.matchedUser || { id: 2, name: '음악친구', chatRoomId: roomId };
+            console.log('매칭 성공 이벤트 받음:', event.detail);
+            
+            // Event 기반 데이터 구조에 맞게 수정
+            const data = event?.detail;
+            const roomId = data?.roomId || data?.matchedUser?.roomId;
+            const matchedUserData = data?.matchedUser || { id: 2, name: '음악친구' };
+            
+            const mUser = {
+                id: matchedUserData.id,
+                name: matchedUserData.name,
+                chatRoomId: roomId
+            };
+            
+            console.log('매칭된 사용자 정보:', mUser, '방 ID:', roomId);
+            
             setMatchingStatus('MATCHED');
             setMatchedUser(mUser);
 
@@ -158,34 +184,6 @@ const Matching: React.FC = () => {
         }
     };
 
-    const createDemoMatch = async () => {
-        try {
-            const { data } = await api.post(
-                '/api/realtime-matching/demo/quick-match',
-                null,
-                { params: { user1Id: userId, user2Id: 2 } }
-            );
-            if (data?.success) {
-                const roomId = data?.demoMatch?.room;
-                const mUser = { id: 2, name: '데모 음악친구', chatRoomId: roomId };
-                setMatchingStatus('MATCHED');
-                setMatchedUser(mUser);
-
-                // ✅ 세션 저장
-                if (roomId) {
-                    sessionStorage.setItem('lastRoomId', String(roomId));
-                }
-                sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
-
-                toast.success('🎉 데모 매칭 성공!');
-            } else {
-                toast.error(data?.message || '데모 매칭 실패');
-            }
-        } catch (error) {
-            console.error('데모 매칭 오류:', error);
-            toast.error('데모 매칭 생성 중 오류가 발생했습니다');
-        }
-    };
 
     const goChat = () => {
         const roomId = matchedUser?.chatRoomId || sessionStorage.getItem('lastRoomId');
@@ -206,6 +204,35 @@ const Matching: React.FC = () => {
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
+
+    // 매칭된 사용자의 대표 배지 조회
+    const fetchMatchedUserBadge = async (userId: number) => {
+        try {
+            const { data } = await api.get(`/api/users/${userId}/representative-badge`);
+            const badge = data ? {
+                id: data.id,
+                badgeType: data.badgeType,
+                badgeName: data.badgeName,
+                description: data.description,
+                iconUrl: data.iconUrl,
+                rarity: data.rarity || 'COMMON',
+                badgeColor: data.badgeColor || '#6B7280'
+            } : null;
+            setMatchedUserBadge(badge);
+        } catch (error) {
+            console.error(`매칭된 사용자 ${userId}의 대표 배지 조회 실패:`, error);
+            setMatchedUserBadge(null);
+        }
+    };
+
+    // 매칭된 사용자가 변경될 때 배지 로드
+    useEffect(() => {
+        if (matchedUser && matchedUser.id && matchingStatus === 'MATCHED') {
+            fetchMatchedUserBadge(Number(matchedUser.id));
+        } else {
+            setMatchedUserBadge(null);
+        }
+    }, [matchedUser, matchingStatus]);
 
     return (
         <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
@@ -248,10 +275,6 @@ const Matching: React.FC = () => {
                                 )}
                             </button>
 
-                            <button className="btn-secondary ml-4" onClick={createDemoMatch}>
-                                <Zap className="h-4 w-4 mr-2" />
-                                데모 매칭 (테스트)
-                            </button>
                         </div>
                     </div>
 
@@ -346,7 +369,51 @@ const Matching: React.FC = () => {
                                     <Music className="h-8 w-8 text-white" />
                                 </div>
                                 <div className="text-center">
-                                    <h3 className="font-bold text-gray-800 dark:text-white text-lg">{matchedUser.name}</h3>
+                                    <div className="flex items-center justify-center gap-2 mb-1">
+                                        <h3 className="font-bold text-gray-800 dark:text-white text-lg">{matchedUser.name}</h3>
+                                        {matchedUserBadge && (
+                                            <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium relative ${
+                                                matchedUserBadge.rarity === 'LEGENDARY' 
+                                                    ? 'legendary-badge-glow legendary-matching-border shadow-md' 
+                                                    : ''
+                                            }`} 
+                                                 style={{ 
+                                                   backgroundColor: `${matchedUserBadge.badgeColor}20`, 
+                                                   color: matchedUserBadge.badgeColor,
+                                                   boxShadow: matchedUserBadge.rarity === 'LEGENDARY' 
+                                                     ? `0 0 8px ${matchedUserBadge.badgeColor}40, 0 0 12px ${matchedUserBadge.badgeColor}25`
+                                                     : 'none',
+                                                   border: matchedUserBadge.rarity === 'LEGENDARY'
+                                                     ? `1px solid ${matchedUserBadge.badgeColor}60`
+                                                     : 'none'
+                                                 }}>
+                                                {matchedUserBadge.rarity === 'LEGENDARY' && (
+                                                    <>
+                                                        <div className="absolute -inset-0.5 rounded-full animate-ping opacity-15"
+                                                             style={{ backgroundColor: matchedUserBadge.badgeColor }}></div>
+                                                        <div className="absolute top-0 left-0 w-full h-full rounded-full"
+                                                             style={{ 
+                                                               background: `linear-gradient(45deg, transparent, ${matchedUserBadge.badgeColor}30, transparent, ${matchedUserBadge.badgeColor}20, transparent)`,
+                                                               animation: 'legendary-wave 2.5s ease-in-out infinite'
+                                                             }}>
+                                                        </div>
+                                                    </>
+                                                )}
+                                                {matchedUserBadge.iconUrl && (
+                                                    <img src={matchedUserBadge.iconUrl} alt="" 
+                                                         className={`w-4 h-4 rounded-full relative z-10 ${
+                                                           matchedUserBadge.rarity === 'LEGENDARY' ? 'legendary-icon-float' : ''
+                                                         }`} />
+                                                )}
+                                                <span className={`relative z-10 font-bold ${
+                                                    matchedUserBadge.rarity === 'LEGENDARY' ? 'legendary-matching-text' : ''
+                                                }`}>{matchedUserBadge.badgeName}</span>
+                                                {matchedUserBadge.rarity === 'LEGENDARY' && (
+                                                    <span className="legendary-sparkle text-yellow-300 text-xs">✨</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                     <p className="text-green-500 font-medium">85% 음악 취향 일치</p>
                                     <p className="text-gray-600 dark:text-gray-400 text-sm">공통 관심사: K-POP, 인디, R&B</p>
                                 </div>

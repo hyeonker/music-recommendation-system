@@ -33,7 +33,7 @@ public class ChatMessageController {
     @PostMapping("/rooms/{roomId}/messages")
     public ResponseEntity<Void> postMessage(
             @PathVariable String roomId,
-            @RequestParam(required = false, defaultValue = "1") Long senderId,
+            @RequestParam(required = true) Long senderId,
             @RequestParam(required = false, defaultValue = "") String content
     ) {
         if (content.trim().isEmpty()) return ResponseEntity.badRequest().build();
@@ -51,7 +51,10 @@ public class ChatMessageController {
     ) {
         if (request.content().trim().isEmpty()) return ResponseEntity.badRequest().build();
         
-        Long senderId = request.senderId() != null ? request.senderId() : 1L;
+        if (request.senderId() == null) {
+            throw new IllegalArgumentException("senderId는 필수입니다");
+        }
+        Long senderId = request.senderId();
         Long normalizedRoomId = normalizeRoomId(roomId);
         chatMessageService.saveText(normalizedRoomId, senderId, request.content().trim());
         return ResponseEntity.ok().build();
@@ -59,7 +62,7 @@ public class ChatMessageController {
     
     // roomId 정규화 헬퍼 메소드
     private Long normalizeRoomId(String roomId) {
-        if (roomId == null) return 1L;
+        if (roomId == null) throw new IllegalArgumentException("roomId는 필수입니다");
         
         // "room_1_2" -> "12" 또는 해시값으로 변환
         String digits = roomId.replaceAll("\\D", "");

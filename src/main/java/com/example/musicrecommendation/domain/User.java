@@ -73,6 +73,12 @@ public class User {
     private UserStatus status = UserStatus.ACTIVE;
 
     /**
+     * 대표 배지 ID (사용자가 선택한 배지가 프로필에 표시됨)
+     */
+    @Column(name = "representative_badge_id")
+    private Long representativeBadgeId;
+
+    /**
      * JPA 기본 생성자 (protected로 외부 생성 방지)
      */
     protected User() {}
@@ -130,6 +136,14 @@ public class User {
 
     public UserStatus getStatus() {
         return status;
+    }
+
+    public Long getRepresentativeBadgeId() {
+        return representativeBadgeId;
+    }
+
+    public void setRepresentativeBadgeId(Long representativeBadgeId) {
+        this.representativeBadgeId = representativeBadgeId;
     }
 
     // === 비즈니스 메서드 ===

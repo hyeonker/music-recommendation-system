@@ -23,6 +23,7 @@ public class WebSocketChatController {
 
     private final ChatMessageService chatMessageService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final com.example.musicrecommendation.service.UserService userService;
 
     /**
      * 특정 채팅방에 메시지 전송
@@ -30,36 +31,55 @@ public class WebSocketChatController {
      */
     @MessageMapping("/chat.sendMessage/{roomId}")
     @SendTo("/topic/room.{roomId}")
-    public ChatMessageResponse sendMessage(@DestinationVariable String roomId,
-                                         @Payload ChatMessageCreateRequest message) {
+    public Object sendMessage(@DestinationVariable String roomId,
+                            @Payload ChatMessageCreateRequest message) {
         try {
+            System.out.println("🔥 WebSocketChatController: 채팅 메시지 수신 - roomId: " + roomId + ", 내용: " + message.content());
+            
             // roomId를 정규화 (room_2_2 -> 22)
             Long normalizedRoomId = normalizeRoomId(roomId);
             Long senderId = message.senderId() != null ? message.senderId() : 1L;
             
+            System.out.println("🔥 WebSocketChatController: 정규화된 roomId: " + normalizedRoomId + ", senderId: " + senderId);
+            
             // 메시지 저장
             var savedMessage = chatMessageService.saveText(normalizedRoomId, senderId, message.content());
             
-            // WebSocket 응답 생성
-            return new ChatMessageResponse(
-                savedMessage.id(),
-                normalizedRoomId,
-                savedMessage.senderId(),
-                savedMessage.content(),
-                OffsetDateTime.ofInstant(savedMessage.createdAt(), ZoneOffset.UTC),
-                "TEXT"
-            );
+            // 사용자 이름 조회
+            String userName = userService.findUserById(senderId)
+                .map(user -> user.getName())
+                .orElse("사용자#" + senderId);
+            
+            System.out.println("🔥 WebSocketChatController: 사용자 이름: " + userName);
+            
+            // 프론트엔드 ChatMessage 인터페이스와 일치하는 응답 생성
+            final String finalRoomId = normalizedRoomId.toString();
+            final String finalUserName = userName;
+            final Object response = new Object() {
+                public final String id = savedMessage.id().toString();
+                public final String roomId = finalRoomId;
+                public final int senderId = savedMessage.senderId().intValue();
+                public final String senderName = finalUserName;
+                public final String content = savedMessage.content();
+                public final String timestamp = OffsetDateTime.ofInstant(savedMessage.createdAt(), ZoneOffset.UTC).toString();
+                // 프론트엔드 호환을 위해 createdAt도 추가
+                public final String createdAt = OffsetDateTime.ofInstant(savedMessage.createdAt(), ZoneOffset.UTC).toString();
+            };
+            
+            System.out.println("🔥 WebSocketChatController: 응답 생성 완료, 브로드캐스트 시작");
+            return response;
             
         } catch (Exception e) {
             // 에러 메시지 전송
-            return new ChatMessageResponse(
-                -1L,
-                -1L,
-                -1L,
-                "메시지 전송 실패: " + e.getMessage(),
-                OffsetDateTime.now(ZoneOffset.UTC),
-                "ERROR"
-            );
+            final String finalRoomId = roomId;
+            return new Object() {
+                public final String id = "-1";
+                public final String roomId = finalRoomId;
+                public final int senderId = -1;
+                public final String senderName = "System";
+                public final String content = "메시지 전송 실패: " + e.getMessage();
+                public final String timestamp = OffsetDateTime.now(ZoneOffset.UTC).toString();
+            };
         }
     }
 

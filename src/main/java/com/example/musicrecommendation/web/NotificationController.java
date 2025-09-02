@@ -205,50 +205,6 @@ public class NotificationController {
         }
     }
     
-    /**
-     * 테스트용 알림 전송
-     */
-    @PostMapping("/{userId}/test")
-    public ResponseEntity<Map<String, Object>> sendTestNotification(
-            @PathVariable Long userId,
-            @RequestBody(required = false) Map<String, Object> request) {
-        
-        try {
-            String type = request != null ? (String) request.getOrDefault("type", "test") : "test";
-            
-            switch (type) {
-                case "match":
-                    notificationService.sendMatchNotification(userId, 999L, 0.85, "테스트 매칭");
-                    break;
-                case "message":
-                    notificationService.sendMessageNotification(userId, 998L, "테스트 사용자", "안녕하세요! 테스트 메시지입니다.");
-                    break;
-                case "playlist":
-                    notificationService.sendPlaylistShareNotification(userId, 997L, "음악친구", "테스트 플레이리스트");
-                    break;
-                case "recommendation":
-                    notificationService.sendRecommendationNotification(userId, "personalized", 10);
-                    break;
-                default:
-                    // 기본 테스트 알림
-                    notificationService.sendMatchNotification(userId, 999L, 0.75, "테스트 알림입니다");
-            }
-            
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "테스트 알림이 전송되었습니다",
-                "type", type,
-                "timestamp", java.time.Instant.now().toString()
-            ));
-            
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of(
-                "success", false,
-                "error", "테스트 알림 전송 실패: " + e.getMessage(),
-                "timestamp", java.time.Instant.now().toString()
-            ));
-        }
-    }
     
     /**
      * 브로드캐스트 알림 전송 (관리자 전용)

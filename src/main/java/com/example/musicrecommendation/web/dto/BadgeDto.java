@@ -62,4 +62,30 @@ public class BadgeDto {
         private String rarity;
         private Double earningRate; // 전체 사용자 대비 획득 비율
     }
+    
+    @Getter @Setter
+    @NoArgsConstructor @AllArgsConstructor @Builder
+    public static class BadgeWithProgress {
+        private UserBadge.BadgeType badgeType;
+        private String badgeName;
+        private String description;
+        private String iconUrl;
+        private String rarity;
+        private String badgeColor;
+        private Boolean isEarned;
+        private OffsetDateTime earnedAt;
+        private Long badgeId; // 획득한 경우에만 존재
+        private Integer currentProgress;
+        private Integer targetProgress;
+        private String progressText;
+    }
+    
+    @Getter @Setter
+    @NoArgsConstructor @AllArgsConstructor @Builder
+    public static class AllBadgesResponse {
+        private java.util.List<BadgeWithProgress> badges;
+        private Long totalBadges;
+        private Long earnedBadges;
+        private Double completionRate;
+    }
 }

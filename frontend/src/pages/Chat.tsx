@@ -25,6 +25,16 @@ type ChatMessage = {
     type?: string;
 };
 
+type RepresentativeBadge = {
+    id: number;
+    badgeType: string;
+    badgeName: string;
+    description: string;
+    iconUrl?: string;
+    rarity: string;
+    badgeColor: string;
+};
+
 type Me = { id: number; name?: string; email?: string | null };
 
 /* ===================== 유틸 ===================== */
@@ -46,7 +56,89 @@ const normalizeRoomId = (roomIdLike: string | number): string => {
     return digits || s; // 숫자 없으면 원문 반환(백엔드도 정규화하므로 안전)
 };
 
-/* ===================== 컴포넌트 ===================== */
+/* ===================== 서브 컴포넌트 ===================== */
+const ChatMessageItem: React.FC<{
+    message: ChatMessage;
+    mine: boolean;
+    fetchUserBadge: (userId: number) => Promise<RepresentativeBadge | null>;
+}> = ({ message, mine, fetchUserBadge }) => {
+    const [badge, setBadge] = useState<RepresentativeBadge | null>(null);
+    const [badgeLoading, setBadgeLoading] = useState(false);
+
+    useEffect(() => {
+        if (!mine && message.senderId && String(message.senderId) !== '0') {
+            setBadgeLoading(true);
+            fetchUserBadge(Number(message.senderId))
+                .then(setBadge)
+                .finally(() => setBadgeLoading(false));
+        }
+    }, [message.senderId, mine, fetchUserBadge]);
+
+    return (
+        <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
+                mine ? 'bg-blue-600 text-white' : 'bg-white/10 text-white'
+            }`}>
+                {!mine && (
+                    <div className="flex items-center gap-2 mb-1">
+                        <div className="text-[10px] opacity-70">
+                            {message.senderName ?? (String(message.senderId) === '0' ? '시스템' : '상대')}
+                        </div>
+                        {badge && (
+                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium relative ${
+                                badge.rarity === 'LEGENDARY' 
+                                    ? 'legendary-badge-glow legendary-chat-border shadow-sm' 
+                                    : ''
+                            }`} 
+                                 style={{ 
+                                   backgroundColor: `${badge.badgeColor}20`, 
+                                   color: badge.badgeColor,
+                                   boxShadow: badge.rarity === 'LEGENDARY' 
+                                     ? `0 0 4px ${badge.badgeColor}40, 0 0 6px ${badge.badgeColor}25`
+                                     : 'none',
+                                   border: badge.rarity === 'LEGENDARY'
+                                     ? `1px solid ${badge.badgeColor}60`
+                                     : 'none'
+                                 }}>
+                                {badge.rarity === 'LEGENDARY' && (
+                                    <>
+                                        <div className="absolute -inset-0.5 rounded-full animate-ping opacity-10"
+                                             style={{ backgroundColor: badge.badgeColor }}></div>
+                                        <div className="absolute top-0 left-0 w-full h-full rounded-full"
+                                             style={{ 
+                                               background: `linear-gradient(45deg, transparent, ${badge.badgeColor}30, transparent, ${badge.badgeColor}20, transparent)`,
+                                               animation: 'legendary-wave 3s ease-in-out infinite'
+                                             }}>
+                                        </div>
+                                    </>
+                                )}
+                                {badge.iconUrl && (
+                                    <img src={badge.iconUrl} alt="" 
+                                         className={`w-3 h-3 rounded-full relative z-10 ${
+                                           badge.rarity === 'LEGENDARY' ? 'legendary-icon-float' : ''
+                                         }`} />
+                                )}
+                                <span className={`relative z-10 font-bold ${
+                                    badge.rarity === 'LEGENDARY' ? 'legendary-chat-text' : ''
+                                }`}>{badge.badgeName}</span>
+                                {badge.rarity === 'LEGENDARY' && (
+                                    <span className="legendary-sparkle text-yellow-300 text-[8px]">✨</span>
+                                )}
+                            </div>
+                        )}
+                        {badgeLoading && <div className="w-3 h-3 bg-gray-400 animate-pulse rounded"></div>}
+                    </div>
+                )}
+                <div className="whitespace-pre-wrap break-words">
+                    {message.content === '[decrypt_error]' ? '🔒 복호화 오류 메시지' : message.content}
+                </div>
+                <div className="text-[10px] opacity-60 mt-1 text-right">{fmtTime(message.createdAt)}</div>
+            </div>
+        </div>
+    );
+};
+
+/* ===================== 메인 컴포넌트 ===================== */
 const Chat: React.FC = () => {
     const navigate = useNavigate();
     const query = useQuery();
@@ -57,6 +149,9 @@ const Chat: React.FC = () => {
 
     // 내 정보
     const [me, setMe] = useState<Me | null>(null);
+    
+    // 사용자별 대표 배지 캐시
+    const [userBadges, setUserBadges] = useState<Map<number, RepresentativeBadge | null>>(new Map());
 
     // 방/메시지 상태
     const [rooms, setRooms] = useState<ChatRoom[]>([]);
@@ -70,6 +165,33 @@ const Chat: React.FC = () => {
 
     const inputRef = useRef<HTMLInputElement>(null);
     const endRef = useRef<HTMLDivElement>(null);
+
+    /* -------- 대표 배지 조회 -------- */
+    const fetchUserBadge = async (userId: number): Promise<RepresentativeBadge | null> => {
+        if (userBadges.has(userId)) {
+            return userBadges.get(userId) || null;
+        }
+
+        try {
+            const { data } = await api.get(`/api/users/${userId}/representative-badge`);
+            const badge = data ? {
+                id: data.id,
+                badgeType: data.badgeType,
+                badgeName: data.badgeName,
+                description: data.description,
+                iconUrl: data.iconUrl,
+                rarity: data.rarity || 'COMMON',
+                badgeColor: data.badgeColor || '#6B7280'
+            } : null;
+            
+            setUserBadges(prev => new Map(prev.set(userId, badge)));
+            return badge;
+        } catch (error) {
+            console.error(`사용자 ${userId}의 대표 배지 조회 실패:`, error);
+            setUserBadges(prev => new Map(prev.set(userId, null)));
+            return null;
+        }
+    };
 
     /* -------- URL/세션에서 roomId 복원 -------- */
     useEffect(() => {
@@ -161,10 +283,37 @@ const Chat: React.FC = () => {
         (async () => {
             await loadMessages(activeRoomId);
             setLoading(false);
+            
+            // 🎯 WebSocket 채팅방 구독 활성화! (연결 상태 확인 후)
+            if (socket?.subscribeToChatRoom) {
+                console.log('🏠 Chat: 채팅방 구독 시작 -', activeRoomId, 'WebSocket 연결 상태:', socket.isConnected);
+                
+                if (socket.isConnected) {
+                    // 이미 연결되어 있으면 바로 구독
+                    socket.subscribeToChatRoom(String(activeRoomId));
+                } else {
+                    // 연결되지 않았다면 연결 완료를 기다린 후 구독
+                    console.log('🔄 Chat: WebSocket 연결 대기 중...');
+                    const checkConnection = setInterval(() => {
+                        if (socket.isConnected) {
+                            console.log('✅ Chat: WebSocket 연결 완료, 채팅방 구독 실행');
+                            socket.subscribeToChatRoom(String(activeRoomId));
+                            clearInterval(checkConnection);
+                        }
+                    }, 100); // 100ms마다 연결 상태 체크
+                    
+                    // 10초 후 타임아웃
+                    setTimeout(() => {
+                        clearInterval(checkConnection);
+                        console.warn('⚠️ Chat: WebSocket 연결 타임아웃');
+                    }, 10000);
+                }
+            }
+            
             setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeRoomId]);
+    }, [activeRoomId, socket?.subscribeToChatRoom]);
 
     /* -------- 소켓 이벤트 구독 -------- */
     useEffect(() => {
@@ -194,8 +343,13 @@ const Chat: React.FC = () => {
             if (d?.typing) setTimeout(() => setPeerTyping(false), 2500);
         };
 
-        window.addEventListener('chatMessage', onWinMsg as EventListener);
+        console.log('🔧 Chat: 이벤트 리스너 등록 - activeRoomId:', activeRoomId);
+        
+        window.addEventListener('newChatMessage', onWinMsg as EventListener);
         window.addEventListener('chatTyping', onWinTyping as EventListener);
+        
+        // 디버깅을 위해 chatMessage도 등록 (혹시나)
+        window.addEventListener('chatMessage', onWinMsg as EventListener);
 
         // SocketContext 쪽 리스너도 있으면 사용
         let offSocketMsg: any;
@@ -204,6 +358,8 @@ const Chat: React.FC = () => {
         }
 
         return () => {
+            console.log('🔧 Chat: 이벤트 리스너 제거');
+            window.removeEventListener('newChatMessage', onWinMsg as EventListener);
             window.removeEventListener('chatMessage', onWinMsg as EventListener);
             window.removeEventListener('chatTyping', onWinTyping as EventListener);
             if (offSocketMsg) offSocketMsg();
@@ -369,25 +525,7 @@ const Chat: React.FC = () => {
                     {activeRoomId &&
                         messages.map((m) => {
                             const mine = me ? String(m.senderId) === String(me.id) : false;
-                            return (
-                                <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                                    <div
-                                        className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
-                                            mine ? 'bg-blue-600 text-white' : 'bg-white/10 text-white'
-                                        }`}
-                                    >
-                                        {!mine && (
-                                            <div className="text-[10px] opacity-70 mb-0.5">
-                                                {m.senderName ?? (String(m.senderId) === '0' ? '시스템' : '상대')}
-                                            </div>
-                                        )}
-                                        <div className="whitespace-pre-wrap break-words">
-                                            {m.content === '[decrypt_error]' ? '🔒 복호화 오류 메시지' : m.content}
-                                        </div>
-                                        <div className="text-[10px] opacity-60 mt-1 text-right">{fmtTime(m.createdAt)}</div>
-                                    </div>
-                                </div>
-                            );
+                            return <ChatMessageItem key={m.id} message={m} mine={mine} fetchUserBadge={fetchUserBadge} />;
                         })}
                     <div ref={endRef} />
                 </div>

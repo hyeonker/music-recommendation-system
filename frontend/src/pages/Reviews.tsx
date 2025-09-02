@@ -8,6 +8,16 @@ interface Review {
   id: number;
   userId: number;
   userNickname?: string;
+  representativeBadge?: {
+    id: number;
+    badgeType: string;
+    badgeName: string;
+    description: string;
+    iconUrl?: string;
+    rarity: string;
+    badgeColor: string;
+    earnedAt: string;
+  };
   musicItem: {
     id: number;
     name: string;
@@ -35,20 +45,45 @@ interface Badge {
   earnedAt: string;
 }
 
+interface BadgeWithProgress {
+  badgeType: string;
+  badgeName: string;
+  description: string;
+  iconUrl?: string;
+  rarity: string;
+  badgeColor: string;
+  isEarned: boolean;
+  earnedAt?: string;
+  badgeId?: number;
+  currentProgress: number;
+  targetProgress: number;
+  progressText: string;
+}
+
+interface AllBadgesResponse {
+  badges: BadgeWithProgress[];
+  totalBadges: number;
+  earnedBadges: number;
+  completionRate: number;
+}
+
 const Reviews: React.FC = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [badges, setBadges] = useState<Badge[]>([]);
+  const [allBadgesData, setAllBadgesData] = useState<AllBadgesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'recent' | 'helpful' | 'my-reviews' | 'my-badges'>('recent');
+  const [badgeSubTab, setBadgeSubTab] = useState<'earned' | 'all'>('earned');
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+  const [representativeBadgeId, setRepresentativeBadgeId] = useState<number | null>(null);
 
   useEffect(() => {
     setCurrentPage(0);
     loadReviews();
-  }, [activeTab]);
+  }, [activeTab, badgeSubTab]);
 
   useEffect(() => {
     loadReviews();
@@ -73,9 +108,9 @@ const Reviews: React.FC = () => {
     fetchCurrentUser();
   }, []);
 
-  // currentUserId가 변경되면 내 리뷰 탭일 때 다시 로드
+  // currentUserId가 변경되면 내 리뷰 탭이나 내 배지 탭일 때 다시 로드
   useEffect(() => {
-    if (currentUserId && activeTab === 'my-reviews') {
+    if (currentUserId && (activeTab === 'my-reviews' || activeTab === 'my-badges')) {
       loadReviews();
     }
   }, [currentUserId]);
@@ -111,10 +146,51 @@ const Reviews: React.FC = () => {
           setTotalPages(Math.min(data.totalPages || 0, 3)); // 최대 3페이지
           break;
         case 'my-badges':
+          // 획득한 배지 로드
           data = await fetch('http://localhost:9090/api/badges/my', {
             credentials: 'include'
           }).then(r => r.json());
           setBadges(data || []);
+          
+          // 전체 배지 데이터 로드 (진행률 포함)
+          try {
+            const allBadgesResponse = await fetch('http://localhost:9090/api/badges/all', {
+              credentials: 'include'
+            });
+            if (allBadgesResponse.ok) {
+              const allBadgesData = await allBadgesResponse.json();
+              console.log('=== 전체 배지 데이터 로드 성공 ===', allBadgesData);
+              setAllBadgesData(allBadgesData);
+            } else {
+              console.error('전체 배지 API 응답 오류:', allBadgesResponse.status, allBadgesResponse.statusText);
+            }
+          } catch (error) {
+            console.error('전체 배지 데이터 로드 오류:', error);
+          }
+          
+          // 현재 설정된 대표 배지 ID 가져오기 (currentUserId가 있을 때만)
+          if (currentUserId) {
+            try {
+              const repResponse = await fetch(`http://localhost:9090/api/badges/user/${currentUserId}/representative`, {
+                credentials: 'include'
+              });
+              if (repResponse.ok) {
+                const text = await repResponse.text();
+                if (text) {
+                  const repBadge = JSON.parse(text);
+                  setRepresentativeBadgeId(repBadge.id);
+                } else {
+                  setRepresentativeBadgeId(null);
+                }
+              } else if (repResponse.status === 204) {
+                // 대표 배지가 설정되지 않음
+                setRepresentativeBadgeId(null);
+              }
+            } catch (repError) {
+              console.error('대표 배지 조회 오류:', repError);
+              setRepresentativeBadgeId(null);
+            }
+          }
           break;
       }
     } catch (error) {
@@ -247,47 +323,341 @@ const Reviews: React.FC = () => {
     />
   );
 
-  const renderBadge = (badge: Badge) => (
-    <div key={badge.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 text-center border border-white/20 shadow-xl hover:transform hover:scale-105 transition-all">
+  // 대표 배지 설정 함수
+  const setRepresentativeBadge = async (badgeId: number) => {
+    try {
+      const response = await fetch('http://localhost:9090/api/badges/representative', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ badgeId })
+      });
+
+      if (response.ok) {
+        setRepresentativeBadgeId(badgeId);
+        alert('대표 배지가 설정되었습니다!');
+      } else {
+        const errorText = await response.text();
+        alert(`대표 배지 설정 실패: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('대표 배지 설정 오류:', error);
+      alert('대표 배지 설정 중 오류가 발생했습니다.');
+    }
+  };
+
+  // 대표 배지 해제 함수
+  const removeRepresentativeBadge = async () => {
+    try {
+      const response = await fetch('http://localhost:9090/api/badges/representative', {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        setRepresentativeBadgeId(null);
+        alert('대표 배지가 해제되었습니다!');
+      } else {
+        const errorText = await response.text();
+        alert(`대표 배지 해제 실패: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('대표 배지 해제 오류:', error);
+      alert('대표 배지 해제 중 오류가 발생했습니다.');
+    }
+  };
+
+  const renderBadgeWithProgress = (badgeData: BadgeWithProgress) => (
+    <div key={badgeData.badgeType} className={`bg-white/10 backdrop-blur-lg rounded-2xl p-6 text-center border shadow-xl transition-all duration-500 relative ${
+      badgeData.isEarned ? 'hover:transform hover:scale-105' : 'opacity-60'
+    } ${
+      badgeData.isEarned && representativeBadgeId === badgeData.badgeId 
+        ? 'border-2 transform scale-105' 
+        : 'border-white/20'
+    } ${
+      badgeData.isEarned && badgeData.rarity === 'LEGENDARY' ? 'legendary-premium-border border-2' : ''
+    }`} style={{
+      boxShadow: undefined,
+      ...(badgeData.isEarned && representativeBadgeId === badgeData.badgeId ? {
+        borderColor: badgeData.badgeColor || '#F59E0B',
+        background: `linear-gradient(135deg, rgba(255,255,255,0.1), ${badgeData.badgeColor}15, rgba(255,255,255,0.05))`,
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.2)`
+      } : {}),
+      ...(badgeData.isEarned && badgeData.rarity === 'LEGENDARY' ? {
+        animation: 'legendary-scale 3s ease-in-out infinite'
+      } : {})
+    }}>
+      {/* 미획득 배지 잠금 표시 */}
+      {!badgeData.isEarned && (
+        <div className="absolute top-2 right-2 text-gray-400">
+          🔒
+        </div>
+      )}
+      
       <div
-        className="w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl shadow-lg"
+        className={`w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl shadow-lg relative ${
+          badgeData.isEarned && badgeData.rarity === 'LEGENDARY' ? '' : ''
+        }`}
         style={{ 
-          backgroundColor: badge.badgeColor || '#3B82F6',
-          boxShadow: `0 0 20px ${badge.badgeColor || '#3B82F6'}40`
+          backgroundColor: badgeData.isEarned ? badgeData.badgeColor || '#3B82F6' : '#6B7280',
+          boxShadow: 'none',
+          ...(badgeData.isEarned && badgeData.rarity === 'LEGENDARY' ? {
+            animation: 'none'
+          } : {})
         }}
       >
+        {/* LEGENDARY 배지 특별 효과 (획득한 경우만) */}
+        {badgeData.isEarned && badgeData.rarity === 'LEGENDARY' && (
+          <>
+            <div className="absolute -inset-0.3 rounded-full animate-ping opacity-6"
+                 style={{ backgroundColor: badgeData.badgeColor }}></div>
+          </>
+        )}
+        
+        {badgeData.isEarned && representativeBadgeId === badgeData.badgeId && (
+          <div className="absolute -top-2 -right-2 rounded-full w-6 h-6 flex items-center justify-center animate-bounce"
+               style={{
+                 backgroundColor: badgeData.badgeColor || '#F59E0B',
+                 boxShadow: 'none'
+               }}>
+            <span className="text-white text-xs font-bold drop-shadow-sm">★</span>
+          </div>
+        )}
+        
+        {badgeData.iconUrl ? (
+          <img 
+            src={badgeData.iconUrl} 
+            alt={badgeData.badgeName} 
+            className={`w-12 h-12 rounded-full relative z-10 ${
+              badgeData.isEarned && badgeData.rarity === 'LEGENDARY' ? 'animate-bounce' : ''
+            } ${!badgeData.isEarned ? 'grayscale' : ''}`}
+          />
+        ) : (
+          <span className={`${badgeData.isEarned && badgeData.rarity === 'LEGENDARY' ? 'animate-bounce' : ''} ${!badgeData.isEarned ? 'grayscale' : ''}`}>🏆</span>
+        )}
+      </div>
+      
+      <h3 className={`font-bold text-xl mb-2 text-white ${
+        badgeData.isEarned && badgeData.rarity === 'LEGENDARY' ? 'legendary-text-float' : ''
+      }`} style={{
+        textShadow: 'none'
+      }}>
+        {badgeData.badgeName}
+        {badgeData.isEarned && badgeData.rarity === 'LEGENDARY' && (
+          <span className="ml-2 legendary-sparkle">✨👑✨</span>
+        )}
+      </h3>
+      
+      <p className="text-sm text-blue-200 mb-4 leading-relaxed">{badgeData.description}</p>
+      
+      {/* 진행률 바 */}
+      {!badgeData.isEarned && badgeData.targetProgress > 0 && (
+        <div className="mb-4">
+          <div className="flex justify-between text-xs text-blue-300 mb-1">
+            <span>{badgeData.currentProgress}/{badgeData.targetProgress}</span>
+            <span>{Math.round((badgeData.currentProgress / badgeData.targetProgress) * 100)}%</span>
+          </div>
+          <div className="w-full bg-gray-600 rounded-full h-2">
+            <div 
+              className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min((badgeData.currentProgress / badgeData.targetProgress) * 100, 100)}%` }}
+            ></div>
+          </div>
+          <p className="text-xs text-blue-300 mt-1">{badgeData.progressText}</p>
+        </div>
+      )}
+      
+      <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold shadow-md relative ${
+        badgeData.rarity === 'LEGENDARY' ? 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-yellow-900 legendary-rarity-glow' :
+        badgeData.rarity === 'EPIC' ? 'bg-gradient-to-r from-purple-500 to-purple-700 text-white' :
+        badgeData.rarity === 'RARE' ? 'bg-gradient-to-r from-blue-500 to-blue-700 text-white' :
+        badgeData.rarity === 'UNCOMMON' ? 'bg-gradient-to-r from-green-500 to-green-700 text-white' :
+        'bg-gradient-to-r from-gray-500 to-gray-700 text-white'
+      }`} style={{
+        boxShadow: 'none'
+      }}>
+        {badgeData.rarity === 'LEGENDARY' && (
+          <div className="absolute -inset-0.15 rounded-full bg-gradient-to-r from-yellow-300 to-yellow-500 animate-ping opacity-8"></div>
+        )}
+        <span className="relative z-10">
+          {badgeData.rarity}
+          {badgeData.rarity === 'LEGENDARY' && (
+            <span className="ml-1 inline-block">⭐</span>
+          )}
+        </span>
+      </span>
+      
+      {badgeData.isEarned && (
+        <p className="text-xs text-blue-300 mt-3 mb-4">
+          {new Date(badgeData.earnedAt!).toLocaleDateString('ko-KR')} 획득
+        </p>
+      )}
+      
+      {/* 대표 배지 설정/해제 버튼 (획득한 배지만) */}
+      {badgeData.isEarned && (
+        <div className="flex flex-col gap-2">
+          {representativeBadgeId === badgeData.badgeId ? (
+            <button
+              onClick={() => removeRepresentativeBadge()}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-all"
+            >
+              대표 배지 해제
+            </button>
+          ) : (
+            <button
+              onClick={() => setRepresentativeBadge(badgeData.badgeId!)}
+              className="px-4 py-2 text-white text-sm font-medium rounded-lg transition-all duration-300 hover:transform hover:scale-105"
+              style={{
+                background: `linear-gradient(135deg, ${badgeData.badgeColor || '#3B82F6'}, ${badgeData.badgeColor || '#3B82F6'}CC)`,
+                boxShadow: `0 4px 12px ${badgeData.badgeColor || '#3B82F6'}40`,
+                border: `1px solid ${badgeData.badgeColor || '#3B82F6'}60`
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = `0 6px 20px ${badgeData.badgeColor || '#3B82F6'}60`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = `0 4px 12px ${badgeData.badgeColor || '#3B82F6'}40`;
+              }}
+            >
+              대표 배지 설정
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderBadge = (badge: Badge) => (
+    <div key={badge.id} className={`bg-white/10 backdrop-blur-lg rounded-2xl p-6 text-center border shadow-xl hover:transform hover:scale-105 transition-all duration-500 relative ${
+      representativeBadgeId === badge.id 
+        ? 'border-2 transform scale-105' 
+        : 'border-white/20'
+    } ${
+      badge.rarity === 'LEGENDARY' ? 'border-2 legendary-premium-border' : ''
+    }`} style={{
+      boxShadow: undefined,
+      ...(representativeBadgeId === badge.id ? {
+        borderColor: badge.badgeColor || '#F59E0B',
+        background: `linear-gradient(135deg, rgba(255,255,255,0.1), ${badge.badgeColor}15, rgba(255,255,255,0.05))`,
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.2)`
+      } : {}),
+      ...(badge.rarity === 'LEGENDARY' ? {
+        animation: 'legendary-scale 3s ease-in-out infinite'
+      } : {})
+    }}>
+      <div
+        className={`w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl shadow-lg relative ${
+          badge.rarity === 'LEGENDARY' ? '' : ''
+        }`}
+        style={{ 
+          backgroundColor: badge.badgeColor || '#3B82F6',
+          boxShadow: 'none',
+          ...(badge.rarity === 'LEGENDARY' ? {
+            animation: 'none'
+          } : {})
+        }}
+      >
+        {/* LEGENDARY 배지 특별 효과 */}
+        {badge.rarity === 'LEGENDARY' && (
+          <>
+            <div className="absolute -inset-0.3 rounded-full animate-ping opacity-6"
+                 style={{ backgroundColor: badge.badgeColor }}></div>
+          </>
+        )}
+        
+        {representativeBadgeId === badge.id && (
+          <div className="absolute -top-2 -right-2 rounded-full w-6 h-6 flex items-center justify-center animate-bounce"
+               style={{
+                 backgroundColor: badge.badgeColor || '#F59E0B',
+                 boxShadow: 'none'
+               }}>
+            <span className="text-white text-xs font-bold drop-shadow-sm">★</span>
+          </div>
+        )}
         {badge.iconUrl ? (
           <img 
             src={badge.iconUrl} 
             alt={badge.badgeName} 
-            className="w-12 h-12 rounded-full"
+            className={`w-12 h-12 rounded-full relative z-10 ${
+              badge.rarity === 'LEGENDARY' ? 'animate-bounce' : ''
+            }`}
             onError={(e) => {
               const target = e.currentTarget as HTMLImageElement;
               target.style.display = 'none';
-              // 부모 div에 기본 이모지 표시
               if (target.parentElement) {
                 target.parentElement.innerHTML = '🏆';
               }
             }}
           />
         ) : (
-          '🏆'
+          <span className={badge.rarity === 'LEGENDARY' ? 'animate-bounce' : ''}>🏆</span>
         )}
       </div>
-      <h3 className="font-bold text-xl mb-2 text-white">{badge.badgeName}</h3>
+      <h3 className={`font-bold text-xl mb-2 text-white ${
+        badge.rarity === 'LEGENDARY' ? 'legendary-text-float' : ''
+      }`} style={{
+        textShadow: 'none'
+      }}>
+        {badge.badgeName}
+        {badge.rarity === 'LEGENDARY' && (
+          <span className="ml-2 legendary-sparkle">✨👑✨</span>
+        )}
+      </h3>
       <p className="text-sm text-blue-200 mb-4 leading-relaxed">{badge.description}</p>
-      <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold shadow-md ${
-        badge.rarity === 'LEGENDARY' ? 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-yellow-900' :
+      <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold shadow-md relative ${
+        badge.rarity === 'LEGENDARY' ? 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-yellow-900 legendary-rarity-glow' :
         badge.rarity === 'EPIC' ? 'bg-gradient-to-r from-purple-500 to-purple-700 text-white' :
         badge.rarity === 'RARE' ? 'bg-gradient-to-r from-blue-500 to-blue-700 text-white' :
         badge.rarity === 'UNCOMMON' ? 'bg-gradient-to-r from-green-500 to-green-700 text-white' :
         'bg-gradient-to-r from-gray-500 to-gray-700 text-white'
-      }`}>
-        {badge.rarity}
+      }`} style={{
+        boxShadow: 'none'
+      }}>
+        {badge.rarity === 'LEGENDARY' && (
+          <div className="absolute -inset-0.15 rounded-full bg-gradient-to-r from-yellow-300 to-yellow-500 animate-ping opacity-8"></div>
+        )}
+        <span className="relative z-10">
+          {badge.rarity}
+          {badge.rarity === 'LEGENDARY' && (
+            <span className="ml-1 inline-block">⭐</span>
+          )}
+        </span>
       </span>
-      <p className="text-xs text-blue-300 mt-3">
+      <p className="text-xs text-blue-300 mt-3 mb-4">
         {new Date(badge.earnedAt).toLocaleDateString('ko-KR')} 획득
       </p>
+      
+      {/* 대표 배지 설정/해제 버튼 */}
+      <div className="flex flex-col gap-2">
+        {representativeBadgeId === badge.id ? (
+          <button
+            onClick={() => removeRepresentativeBadge()}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-all"
+          >
+            대표 배지 해제
+          </button>
+        ) : (
+          <button
+            onClick={() => setRepresentativeBadge(badge.id)}
+            className="px-4 py-2 text-white text-sm font-medium rounded-lg transition-all duration-300 hover:transform hover:scale-105"
+            style={{
+              background: `linear-gradient(135deg, ${badge.badgeColor || '#3B82F6'}, ${badge.badgeColor || '#3B82F6'}CC)`,
+              boxShadow: `0 4px 12px ${badge.badgeColor || '#3B82F6'}40`,
+              border: `1px solid ${badge.badgeColor || '#3B82F6'}60`
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = `0 6px 20px ${badge.badgeColor || '#3B82F6'}60`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = `0 4px 12px ${badge.badgeColor || '#3B82F6'}40`;
+            }}
+          >
+            대표 배지 설정
+          </button>
+        )}
+      </div>
     </div>
   );
 
@@ -331,8 +701,67 @@ const Reviews: React.FC = () => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
           </div>
         ) : activeTab === 'my-badges' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {badges.map(renderBadge)}
+          <div>
+            {/* 배지 서브탭 */}
+            <div className="flex space-x-1 mb-6">
+              <button
+                onClick={() => setBadgeSubTab('earned')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  badgeSubTab === 'earned'
+                    ? 'bg-gradient-to-r from-green-600 to-blue-600 text-white shadow-lg transform scale-105'
+                    : 'bg-white/10 backdrop-blur-lg text-white hover:bg-white/20 border border-white/20'
+                }`}
+              >
+                획득한 배지 ({badges.length})
+              </button>
+              <button
+                onClick={() => setBadgeSubTab('all')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  badgeSubTab === 'all'
+                    ? 'bg-gradient-to-r from-green-600 to-blue-600 text-white shadow-lg transform scale-105'
+                    : 'bg-white/10 backdrop-blur-lg text-white hover:bg-white/20 border border-white/20'
+                }`}
+              >
+                전체 배지 도감 {allBadgesData ? `(${allBadgesData.earnedBadges}/${allBadgesData.totalBadges})` : ''}
+              </button>
+            </div>
+
+            {/* 완성률 표시 (전체 배지 도감에서만) */}
+            {badgeSubTab === 'all' && allBadgesData && (
+              <div className="mb-6 bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-lg font-bold text-white">배지 수집 진행률</h3>
+                  <span className="text-lg font-bold text-green-400">
+                    {Math.round(allBadgesData.completionRate)}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-600 rounded-full h-3">
+                  <div 
+                    className="bg-gradient-to-r from-green-500 to-blue-500 h-3 rounded-full transition-all duration-1000"
+                    style={{ width: `${allBadgesData.completionRate}%` }}
+                  ></div>
+                </div>
+                <p className="text-sm text-blue-200 mt-2">
+                  {allBadgesData.earnedBadges}개 획득 / {allBadgesData.totalBadges}개 전체
+                </p>
+              </div>
+            )}
+
+            {/* 배지 그리드 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {badgeSubTab === 'earned' ? (
+                badges.map(renderBadge)
+              ) : (
+                (() => {
+                  console.log('=== 전체 배지 렌더링 체크 ===', { 
+                    allBadgesData, 
+                    badgesCount: allBadgesData?.badges?.length,
+                    badgeSubTab 
+                  });
+                  return allBadgesData?.badges.map(renderBadgeWithProgress) || [];
+                })()
+              )}
+            </div>
           </div>
         ) : (
           <>

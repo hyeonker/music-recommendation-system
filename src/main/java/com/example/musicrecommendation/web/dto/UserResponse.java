@@ -29,6 +29,9 @@ public class UserResponse {
     @Schema(description = "OAuth2 제공자", example = "GOOGLE")
     private AuthProvider provider;
 
+    @Schema(description = "OAuth2 제공자 사용자 ID", example = "123456789")
+    private String providerId;
+
     @Schema(description = "계정 생성일시")
     private LocalDateTime createdAt;
 
@@ -47,12 +50,13 @@ public class UserResponse {
      * 모든 필드를 받는 생성자
      */
     public UserResponse(Long id, String email, String name, String profileImageUrl,
-                        AuthProvider provider, LocalDateTime createdAt, LocalDateTime updatedAt, UserStatus status) {
+                        AuthProvider provider, String providerId, LocalDateTime createdAt, LocalDateTime updatedAt, UserStatus status) {
         this.id = id;
         this.email = email;
         this.name = name;
         this.profileImageUrl = profileImageUrl;
         this.provider = provider;
+        this.providerId = providerId;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.status = status;
@@ -71,6 +75,7 @@ public class UserResponse {
                 user.getName(),
                 user.getProfileImageUrl(),
                 user.getProvider(),
+                user.getProviderId(),
                 user.getCreatedAt(),
                 user.getUpdatedAt(),
                 user.getStatus()
@@ -116,6 +121,14 @@ public class UserResponse {
 
     public void setProvider(AuthProvider provider) {
         this.provider = provider;
+    }
+
+    public String getProviderId() {
+        return providerId;
+    }
+
+    public void setProviderId(String providerId) {
+        this.providerId = providerId;
     }
 
     public LocalDateTime getCreatedAt() {

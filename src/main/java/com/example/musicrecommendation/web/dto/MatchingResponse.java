@@ -1,7 +1,7 @@
 package com.example.musicrecommendation.web.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
@@ -22,13 +22,13 @@ public class MatchingResponse {
         private int totalCandidates;
 
         @Schema(description = "응답 시간")
-        private LocalDateTime timestamp;
+        private OffsetDateTime timestamp;
 
         public MatchCandidateResponse(Long userId, List<MatchDto> candidates) {
             this.userId = userId;
             this.candidates = candidates;
             this.totalCandidates = candidates.size();
-            this.timestamp = LocalDateTime.now();
+            this.timestamp = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
         }
 
         // Getters and Setters
@@ -41,8 +41,8 @@ public class MatchingResponse {
         public int getTotalCandidates() { return totalCandidates; }
         public void setTotalCandidates(int totalCandidates) { this.totalCandidates = totalCandidates; }
 
-        public LocalDateTime getTimestamp() { return timestamp; }
-        public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }
+        public OffsetDateTime getTimestamp() { return timestamp; }
+        public void setTimestamp(OffsetDateTime timestamp) { this.timestamp = timestamp; }
     }
 
     @Schema(description = "매칭 정보")
@@ -69,10 +69,10 @@ public class MatchingResponse {
         private Integer commonArtists;
 
         @Schema(description = "생성 시간")
-        private LocalDateTime createdAt;
+        private OffsetDateTime createdAt;
 
         @Schema(description = "마지막 상호작용 시간")
-        private LocalDateTime lastInteractionAt;
+        private OffsetDateTime lastInteractionAt;
 
         public MatchDto() {}
 
@@ -84,7 +84,7 @@ public class MatchingResponse {
             this.matchStatus = matchStatus;
             this.matchReason = matchReason;
             this.commonLikedSongs = commonLikedSongs;
-            this.createdAt = LocalDateTime.now();
+            this.createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
         }
 
         // Getters and Setters
@@ -109,11 +109,11 @@ public class MatchingResponse {
         public Integer getCommonArtists() { return commonArtists; }
         public void setCommonArtists(Integer commonArtists) { this.commonArtists = commonArtists; }
 
-        public LocalDateTime getCreatedAt() { return createdAt; }
-        public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public OffsetDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
 
-        public LocalDateTime getLastInteractionAt() { return lastInteractionAt; }
-        public void setLastInteractionAt(LocalDateTime lastInteractionAt) { this.lastInteractionAt = lastInteractionAt; }
+        public OffsetDateTime getLastInteractionAt() { return lastInteractionAt; }
+        public void setLastInteractionAt(OffsetDateTime lastInteractionAt) { this.lastInteractionAt = lastInteractionAt; }
     }
 
     @Schema(description = "사용자 기본 정보")
@@ -128,11 +128,11 @@ public class MatchingResponse {
         private String email;
 
         @Schema(description = "가입일")
-        private LocalDateTime createdAt;
+        private OffsetDateTime createdAt;
 
         public UserInfo() {}
 
-        public UserInfo(Long id, String username, String email, LocalDateTime createdAt) {
+        public UserInfo(Long id, String username, String email, OffsetDateTime createdAt) {
             this.id = id;
             this.username = username;
             this.email = email;
@@ -149,7 +149,7 @@ public class MatchingResponse {
         public String getEmail() { return email; }
         public void setEmail(String email) { this.email = email; }
 
-        public LocalDateTime getCreatedAt() { return createdAt; }
-        public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public OffsetDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
     }
 }

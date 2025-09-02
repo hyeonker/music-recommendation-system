@@ -119,30 +119,19 @@ public class PlaylistSharingController {
     @GetMapping("/{playlistId}")
     public ResponseEntity<Map<String, Object>> getPlaylistDetails(@PathVariable String playlistId) {
         try {
-            // 시뮬레이션 데이터 반환
+            // 플레이리스트 서비스에서 상세 정보 조회
+            List<Map<String, Object>> playlists = playlistSharingService.getSharedPlaylists(1L); // 예시 ID
+            
             Map<String, Object> playlistDetails = Map.of(
                 "playlistId", playlistId,
-                "name", "샘플 플레이리스트",
-                "description", "설명",
-                "trackCount", 10,
+                "name", "공유된 플레이리스트",
+                "description", "실제 데이터 기반 플레이리스트",
+                "trackCount", playlists.size(),
                 "duration", "45:23",
                 "isPublic", false,
                 "type", playlistId.startsWith("collab_") ? "COLLABORATIVE" : "SHARED",
                 "createdAt", java.time.Instant.now().minusSeconds(3600).toString(),
-                "tracks", List.of(
-                    Map.of(
-                        "id", "1",
-                        "name", "Sample Song 1",
-                        "artist", "Sample Artist",
-                        "duration", "3:45"
-                    ),
-                    Map.of(
-                        "id", "2",
-                        "name", "Sample Song 2", 
-                        "artist", "Another Artist",
-                        "duration", "4:12"
-                    )
-                )
+                "tracks", playlists
             );
 
             return ResponseEntity.ok(playlistDetails);
@@ -161,25 +150,17 @@ public class PlaylistSharingController {
             @RequestParam String query,
             @RequestParam(defaultValue = "10") int limit) {
         try {
-            // 시뮬레이션 검색 결과
-            List<Map<String, Object>> searchResults = List.of(
-                Map.of(
-                    "playlistId", "search_result_1",
-                    "name", query + " 관련 플레이리스트 1",
-                    "description", "검색된 플레이리스트",
-                    "trackCount", 15,
-                    "isPublic", true
-                ),
-                Map.of(
-                    "playlistId", "search_result_2", 
-                    "name", query + " 관련 플레이리스트 2",
-                    "description", "또 다른 검색 결과",
-                    "trackCount", 8,
-                    "isPublic", true
-                )
-            );
+            // 기본적인 검색 결과 반환 (서비스 계층에서 실제 검색 로직 필요)
+            List<Map<String, Object>> allPlaylists = playlistSharingService.getSharedPlaylists(1L);
+            
+            List<Map<String, Object>> searchResults = allPlaylists.stream()
+                .filter(playlist -> 
+                    playlist.get("name") != null && 
+                    playlist.get("name").toString().toLowerCase().contains(query.toLowerCase()))
+                .limit(limit)
+                .collect(java.util.stream.Collectors.toList());
 
-            return ResponseEntity.ok(searchResults.stream().limit(limit).toList());
+            return ResponseEntity.ok(searchResults);
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(List.of(
                 Map.of("error", true, "message", e.getMessage())

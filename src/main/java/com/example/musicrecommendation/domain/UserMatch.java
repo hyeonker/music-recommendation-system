@@ -1,7 +1,7 @@
 package com.example.musicrecommendation.domain;
 
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * 사용자 매칭 엔티티 (간소화 버전)
@@ -42,13 +42,13 @@ public class UserMatch {
     private String matchType = "MUSIC_TASTE";
 
     @Column(name = "last_interaction_at")
-    private LocalDateTime lastInteractionAt;
+    private OffsetDateTime lastInteractionAt;
 
     @Column(name = "created_at")
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     // 기본 생성자
     public UserMatch() {}
@@ -60,19 +60,19 @@ public class UserMatch {
         this.similarityScore = similarityScore;
         this.matchReason = matchReason;
         this.matchType = "MUSIC_TASTE";
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
+        this.updatedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
     }
 
     @PrePersist
     protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
+        this.updatedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
     }
 
     @PreUpdate
     protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
+        this.updatedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
     }
 
     // Getters and Setters
@@ -106,12 +106,12 @@ public class UserMatch {
     public String getMatchType() { return matchType; }
     public void setMatchType(String matchType) { this.matchType = matchType; }
 
-    public LocalDateTime getLastInteractionAt() { return lastInteractionAt; }
-    public void setLastInteractionAt(LocalDateTime lastInteractionAt) { this.lastInteractionAt = lastInteractionAt; }
+    public OffsetDateTime getLastInteractionAt() { return lastInteractionAt; }
+    public void setLastInteractionAt(OffsetDateTime lastInteractionAt) { this.lastInteractionAt = lastInteractionAt; }
 
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
 
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public OffsetDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

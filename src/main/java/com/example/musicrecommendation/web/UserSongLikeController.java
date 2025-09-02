@@ -210,10 +210,12 @@ public class UserSongLikeController {
             @RequestBody ExternalSongLikeRequest request) {
 
         try {
-            // 현재는 기본 사용자 ID 1 사용 (나중에 인증에서 가져오도록 수정 가능)
-            Long userId = 1L;
+            // TODO: 실제 인증된 사용자 ID 사용
+            throw new IllegalStateException("사용자 인증이 구현되지 않았습니다");
             
+            /*
             boolean liked = userSongLikeService.likeExternalSong(
+
                     userId,
                     request.getSongId(),
                     request.getTitle(),
@@ -226,7 +228,8 @@ public class UserSongLikeController {
             long totalLikes = userSongLikeService.getSongLikeCount(songIdAsLong);
 
             LikeToggleResponse response = new LikeToggleResponse(userId, songIdAsLong, liked, totalLikes);
-            return ResponseEntity.ok(response);
+            */
+            // return ResponseEntity.ok(response);
 
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
@@ -247,9 +250,10 @@ public class UserSongLikeController {
             @PathVariable String songId) {
 
         try {
-            // 현재는 기본 사용자 ID 1 사용
-            Long userId = 1L;
+            // TODO: 실제 인증된 사용자 ID 사용
+            throw new IllegalStateException("사용자 인증이 구현되지 않았습니다");
             
+            /*
             boolean liked = userSongLikeService.unlikeExternalSong(userId, songId);
             
             // songId를 Long으로 파싱 (Spotify ID를 해시코드로 변환)
@@ -258,6 +262,7 @@ public class UserSongLikeController {
 
             LikeToggleResponse response = new LikeToggleResponse(userId, songIdAsLong, liked, totalLikes);
             return ResponseEntity.ok(response);
+            */
 
         } catch (Exception e) {
             return ResponseEntity.notFound().build();

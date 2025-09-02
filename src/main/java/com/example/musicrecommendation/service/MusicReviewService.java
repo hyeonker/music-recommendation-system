@@ -5,6 +5,7 @@ import com.example.musicrecommendation.repository.*;
 import com.example.musicrecommendation.domain.ReviewReport;
 import com.example.musicrecommendation.security.ReviewSecurityService;
 import com.example.musicrecommendation.web.dto.ReviewDto;
+import com.example.musicrecommendation.web.dto.BadgeDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -318,7 +319,13 @@ public class MusicReviewService {
                 .map(User::getName)
                 .orElse("알 수 없는 사용자");
         
-        return ReviewDto.Response.fromWithUserNickname(review, userNickname);
+        // 대표 배지 정보도 가져오기
+        var representativeBadge = badgeService.getRepresentativeBadge(review.getUserId());
+        var representativeBadgeDto = representativeBadge != null 
+                ? BadgeDto.Response.from(representativeBadge) 
+                : null;
+        
+        return ReviewDto.Response.fromWithUserInfo(review, userNickname, representativeBadgeDto);
     }
     
     /**

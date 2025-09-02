@@ -71,6 +71,7 @@ public class ReviewDto {
         private Long id;
         private Long userId;
         private String userNickname; // 사용자 서비스에서 가져와 설정
+        private BadgeDto.Response representativeBadge; // 사용자의 대표 배지
         private MusicItemDto musicItem;
         private Integer rating;
         private String ratingEmoji;
@@ -91,6 +92,7 @@ public class ReviewDto {
                     .id(review.getId())
                     .userId(review.getUserId())
                     .userNickname(null) // 별도로 설정 필요
+                    .representativeBadge(null) // 별도로 설정 필요
                     .musicItem(MusicItemDto.from(review.getMusicItem()))
                     .rating(review.getRating())
                     .ratingEmoji(review.getRatingEmoji())
@@ -113,6 +115,30 @@ public class ReviewDto {
                     .id(review.getId())
                     .userId(review.getUserId())
                     .userNickname(userNickname)
+                    .representativeBadge(null) // 별도로 설정 필요
+                    .musicItem(MusicItemDto.from(review.getMusicItem()))
+                    .rating(review.getRating())
+                    .ratingEmoji(review.getRatingEmoji())
+                    .reviewText(review.getReviewText())
+                    .tags(review.getTags())
+                    .isSpoiler(review.getIsSpoiler())
+                    .isPublic(review.getIsPublic())
+                    .helpfulCount(review.getHelpfulCount())
+                    .reportCount(review.getReportCount())
+                    .isHelpful(review.isHelpful())
+                    .isReported(review.isReported())
+                    .isShortReview(review.isShortReview())
+                    .createdAt(review.getCreatedAt())
+                    .updatedAt(review.getUpdatedAt())
+                    .build();
+        }
+        
+        public static Response fromWithUserInfo(MusicReview review, String userNickname, BadgeDto.Response representativeBadge) {
+            return Response.builder()
+                    .id(review.getId())
+                    .userId(review.getUserId())
+                    .userNickname(userNickname)
+                    .representativeBadge(representativeBadge)
                     .musicItem(MusicItemDto.from(review.getMusicItem()))
                     .rating(review.getRating())
                     .ratingEmoji(review.getRatingEmoji())

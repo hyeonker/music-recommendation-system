@@ -7,7 +7,9 @@
       "Bash(/dev/null)",
       "Bash(docker start:*)",
       "Bash(docker run:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(docker exec:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

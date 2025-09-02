@@ -28,7 +28,7 @@ public class ReviewHelpful {
     @PrePersist
     public void prePersist() {
         if (createdAt == null) {
-            createdAt = OffsetDateTime.now();
+            createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
         }
     }
 }

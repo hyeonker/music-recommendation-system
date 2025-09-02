@@ -31,7 +31,7 @@ public class ReviewSecurityService {
     
     public boolean canCreateReview(Long userId, String externalId) {
         // 사용자의 최근 리뷰 작성 빈도 체크 (스팸 방지)
-        OffsetDateTime oneHourAgo = OffsetDateTime.now().minusHours(1);
+        OffsetDateTime oneHourAgo = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul")).minusHours(1);
         long recentReviews = reviewRepository.findByUserId(userId)
                 .stream()
                 .filter(review -> review.getCreatedAt().isAfter(oneHourAgo))
@@ -61,7 +61,7 @@ public class ReviewSecurityService {
         }
         
         // 생성 후 24시간 이내만 수정 가능
-        OffsetDateTime dayAgo = OffsetDateTime.now().minusHours(24);
+        OffsetDateTime dayAgo = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul")).minusHours(24);
         if (review.getCreatedAt().isBefore(dayAgo)) {
             log.warn("리뷰 {} 수정 시간 초과 (24시간)", reviewId);
             return false;

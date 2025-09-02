@@ -4,6 +4,7 @@ import {
     Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star, Shield, Search
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
+import NotificationCenter from './notifications/NotificationCenter';
 
 const Navbar = ({ darkMode, toggleDarkMode }) => {
     const location = useLocation();
@@ -107,6 +108,9 @@ const Navbar = ({ darkMode, toggleDarkMode }) => {
               <span className="neon-dot" />
               실시간 연결
             </span>
+
+                        {/* 배지 알림 센터 */}
+                        <NotificationCenter userId={user.id} />
 
                         {/* 다크모드 */}
                         <button

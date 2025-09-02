@@ -65,13 +65,13 @@ public class MusicItem {
     
     @PrePersist
     protected void onCreate() {
-        createdAt = OffsetDateTime.now();
-        updatedAt = OffsetDateTime.now();
+        createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
+        updatedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
     }
     
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = OffsetDateTime.now();
+        updatedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
     }
     
     public enum MusicItemType {

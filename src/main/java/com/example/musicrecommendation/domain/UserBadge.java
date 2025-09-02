@@ -40,6 +40,9 @@ public class UserBadge {
     @Column(name = "earned_at", nullable = false)
     private OffsetDateTime earnedAt;
     
+    @Column(name = "expires_at")
+    private OffsetDateTime expiresAt; // 배지 만료일 (이벤트 배지 등)
+    
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "metadata", columnDefinition = "jsonb")
     private Map<String, Object> metadata;
@@ -47,7 +50,7 @@ public class UserBadge {
     @PrePersist
     protected void onCreate() {
         if (earnedAt == null) {
-            earnedAt = OffsetDateTime.now();
+            earnedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
         }
     }
     
@@ -71,7 +74,18 @@ public class UserBadge {
         // 특별 배지
         BETA_TESTER("베타 테스터", "🧪"),
         ANNIVERSARY("기념일", "🎉"),
-        SPECIAL_EVENT("특별 이벤트", "🌟");
+        SPECIAL_EVENT("특별 이벤트", "🌟"),
+        
+        // 운영자 전용 배지
+        ADMIN("시스템 관리자", "👑"),
+        FOUNDER("창립자", "🏆"),
+        COMMUNITY_LEADER("커뮤니티 리더", "🌟"),
+        CONTENT_CURATOR("콘텐츠 큐레이터", "🎨"),
+        TRENDSETTER("트렌드세터", "🔥"),
+        QUALITY_GUARDIAN("품질 관리자", "🛡️"),
+        INNOVATION_PIONEER("혁신 개척자", "🚀"),
+        MUSIC_SCHOLAR("음악 학자", "🎓"),
+        PLATINUM_MEMBER("플래티넘 멤버", "💎");
         
         private final String defaultName;
         private final String defaultIcon;
@@ -92,7 +106,10 @@ public class UserBadge {
             case REVIEW_MASTER, GENRE_EXPLORER, FRIEND_MAKER -> "UNCOMMON";
             case HELPFUL_REVIEWER, CRITIC, EARLY_ADOPTER -> "RARE";
             case MUSIC_DISCOVERER, CHAT_MASTER -> "EPIC";
-            case BETA_TESTER, ANNIVERSARY, SPECIAL_EVENT -> "LEGENDARY";
+            case BETA_TESTER, ANNIVERSARY, SPECIAL_EVENT, 
+                 ADMIN, FOUNDER, COMMUNITY_LEADER, CONTENT_CURATOR, 
+                 TRENDSETTER, QUALITY_GUARDIAN, INNOVATION_PIONEER, 
+                 MUSIC_SCHOLAR, PLATINUM_MEMBER -> "LEGENDARY";
         };
     }
     
@@ -106,5 +123,26 @@ public class UserBadge {
             case "LEGENDARY" -> "#F1C40F";   // 금색
             default -> "#BDC3C7";
         };
+    }
+    
+    // 배지 만료 여부 확인
+    public boolean isExpired() {
+        if (expiresAt == null) {
+            return false; // 만료일이 없으면 영구 배지
+        }
+        // 한국 시간(KST)으로 통일해서 비교
+        OffsetDateTime nowKst = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
+        OffsetDateTime expiresAtKst = expiresAt.atZoneSameInstant(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime();
+        return nowKst.isAfter(expiresAtKst);
+    }
+    
+    // 배지 만료까지 남은 일수
+    public long getDaysUntilExpiry() {
+        if (expiresAt == null) {
+            return -1; // 영구 배지
+        }
+        OffsetDateTime nowKst = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
+        OffsetDateTime expiresAtKst = expiresAt.atZoneSameInstant(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime();
+        return java.time.temporal.ChronoUnit.DAYS.between(nowKst, expiresAtKst);
     }
 }

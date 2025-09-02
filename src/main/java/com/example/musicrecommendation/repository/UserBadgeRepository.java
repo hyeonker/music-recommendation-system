@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,4 +30,15 @@ public interface UserBadgeRepository extends JpaRepository<UserBadge, Long> {
     
     @Query("SELECT DISTINCT b.userId FROM UserBadge b WHERE b.badgeType = :badgeType")
     List<Long> findUserIdsByBadgeType(@Param("badgeType") UserBadge.BadgeType badgeType);
+    
+    boolean existsByUserIdAndId(Long userId, Long badgeId);
+    
+    // 만료된 배지 조회
+    List<UserBadge> findByExpiresAtBefore(OffsetDateTime dateTime);
+    
+    // 만료 예정 배지 조회 (알림용)
+    List<UserBadge> findByExpiresAtBetween(OffsetDateTime start, OffsetDateTime end);
+    
+    // 만료일이 설정된 모든 배지 조회 (디버깅용)
+    List<UserBadge> findByExpiresAtIsNotNull();
 }

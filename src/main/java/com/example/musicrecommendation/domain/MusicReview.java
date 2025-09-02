@@ -60,8 +60,8 @@ public class MusicReview {
     
     @PrePersist
     protected void onCreate() {
-        createdAt = OffsetDateTime.now();
-        updatedAt = OffsetDateTime.now();
+        createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
+        updatedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
         
         // 평점 유효성 검사
         if (rating < 1 || rating > 5) {
@@ -71,7 +71,7 @@ public class MusicReview {
     
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = OffsetDateTime.now();
+        updatedAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
     }
     
     // 도움이 되는 리뷰인지 확인

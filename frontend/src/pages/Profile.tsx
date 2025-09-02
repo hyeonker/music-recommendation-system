@@ -405,6 +405,13 @@ const Profile: React.FC = () => {
             
             if (response.ok) {
                 const data = await response.json();
+                
+                // 서버에서 관리자 권한을 확인한 경우 항상 허용
+                if (data.isAdmin) {
+                    setNameError('');
+                    return;
+                }
+                
                 if (data.exists) {
                     setNameError('이미 사용 중인 닉네임입니다');
                 } else {
@@ -483,8 +490,8 @@ const Profile: React.FC = () => {
     };
 
     const onSaveProfile = async () => {
-        // 저장 전 이름 중복 체크
-        if (nameError) {
+        // 운영자가 아닌 경우에만 이름 중복 체크
+        if (!isAdmin && nameError) {
             toast.error('닉네임 중복을 해결해주세요');
             return;
         }

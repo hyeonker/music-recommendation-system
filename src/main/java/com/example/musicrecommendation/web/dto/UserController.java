@@ -191,6 +191,30 @@ public class UserController {
         return ResponseEntity.ok(count);
     }
     
+    /**
+     * 관리자 전용: 모든 사용자 조회 (상태 포함)
+     */
+    @GetMapping("/all")
+    @Operation(summary = "관리자용 전체 사용자 조회", description = "관리자가 모든 사용자 목록을 상태와 함께 조회합니다.")
+    @ApiResponse(responseCode = "200", description = "조회 성공")
+    public ResponseEntity<List<UserResponse>> getAllUsersForAdmin(@AuthenticationPrincipal OAuth2User oauth2User) {
+        if (oauth2User == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        
+        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+        if (!userService.isAdminByEmail(email)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        
+        List<User> users = userService.findAllUsers();
+        List<UserResponse> responses = users.stream()
+                .map(UserResponse::from)
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(responses);
+    }
+    
     
     /**
      * 닉네임 중복 확인
@@ -213,6 +237,11 @@ public class UserController {
                             .map(User::getId)
                             .orElse(null);
                 }
+            }
+            
+            // 운영자 권한 확인 - ID가 1이고 이름이 "운영자"인 경우 항상 허용
+            if (currentUserId != null && userService.isAdmin(currentUserId)) {
+                return ResponseEntity.ok(Map.of("exists", false, "isAdmin", true));
             }
             
             boolean exists = userService.isNameExistsExcludingUser(name, currentUserId);
@@ -274,8 +303,8 @@ public class UserController {
             User user = userService.findUserByEmail(email)
                     .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다"));
             
-            // 닉네임 중복 체크 (자신은 제외)
-            if (userService.isNameExistsExcludingUser(newName.trim(), user.getId())) {
+            // 운영자가 아닌 경우에만 닉네임 중복 체크 (자신은 제외)
+            if (!userService.isAdmin(user.getId()) && userService.isNameExistsExcludingUser(newName.trim(), user.getId())) {
                 return ResponseEntity.badRequest().build();
             }
                     

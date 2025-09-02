@@ -81,7 +81,7 @@ public class GlobalExceptionHandler {
     /** 공통 응답 바디 생성 (null-safe, 불변 Map 사용 안 함) */
     private Map<String, Object> body(String message, String detail, String path, HttpStatus status) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("timestamp", OffsetDateTime.now().toString());
+        m.put("timestamp", OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul")).toString());
         m.put("status", status.value());
         m.put("error", status.getReasonPhrase());
         m.put("message", message);

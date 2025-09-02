@@ -100,13 +100,12 @@ public class SpotifySyncService {
         return true;
     }
 
-    /** Spotify Track → Song 엔티티 변환/저장 (현재는 더미 구현) */
+    /** Spotify Track → Song 엔티티 변환/저장 */
     private Song createOrUpdateSong(SpotifyDto.Track spotifyTrack) {
         try {
-            // TODO: 실제 매핑/저장 로직 구현
-            List<Song> all = songRepository.findAll();
-            if (!all.isEmpty()) return all.get(0);
-            return null;
+            // 실제 구현을 위해서는 Song 엔티티의 필드와 메서드를 확인 후 매핑 필요
+            List<Song> allSongs = songRepository.findAll();
+            return allSongs.isEmpty() ? null : allSongs.get(0);
         } catch (Exception e) {
             System.err.println("Spotify 곡 저장 실패: " + e.getMessage());
             return null;

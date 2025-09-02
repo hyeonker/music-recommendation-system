@@ -30,12 +30,25 @@ public class RealtimeMatchingService {
             public final Object data = matchingResult;
             public final String timestamp = LocalDateTime.now().toString();
             public final boolean success = true;
+            public final String status = "MATCHED";
+            public final Object matchingData = matchingResult;
         };
 
-        // 특정 사용자에게 개인 알림 전송
+        System.out.println("=== 매칭 성공 WebSocket 알림 전송 ===");
+        System.out.println("대상 사용자: " + userId);
+        System.out.println("알림 데이터: " + notification.toString());
+
+        // 특정 사용자에게 개인 알림 전송 (기존)
         messagingTemplate.convertAndSendToUser(
                 userId.toString(),
                 "/queue/notifications",
+                notification
+        );
+        
+        // 매칭 결과 채널로도 전송 (추가)
+        messagingTemplate.convertAndSendToUser(
+                userId.toString(),
+                "/queue/matching-result",
                 notification
         );
 

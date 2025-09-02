@@ -259,34 +259,14 @@ public class MusicRecommendationController {
             @RequestParam(defaultValue = "10") int limit) {
         
         try {
-            // 시뮬레이션 데이터 생성
-            List<Map<String, Object>> genreRecommendations = List.of(
-                Map.of(
-                    "id", "genre_rec_1",
-                    "name", "Best " + genre + " Track",
-                    "artist", genre + " Artist #1",
-                    "album", "Greatest " + genre + " Hits",
-                    "genre", genre,
-                    "duration", "3:45",
-                    "popularity", 88,
-                    "recommendationType", "genre_based"
-                ),
-                Map.of(
-                    "id", "genre_rec_2",
-                    "name", "Popular " + genre + " Song",
-                    "artist", genre + " Artist #2", 
-                    "album", "Top " + genre + " Collection",
-                    "genre", genre,
-                    "duration", "4:12",
-                    "popularity", 82,
-                    "recommendationType", "genre_based"
-                )
-            );
+            // 장르 기반 추천 (실제 구현 필요)
+            List<Map<String, Object>> genreRecommendations = 
+                recommendationEngine.getPersonalizedRecommendations(1L, limit);
             
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "genre", genre,
-                "recommendations", genreRecommendations.stream().limit(limit).toList(),
+                "recommendations", genreRecommendations,
                 "message", genre + " 장르 기반 추천이 생성되었습니다",
                 "timestamp", java.time.Instant.now().toString()
             ));
@@ -363,10 +343,9 @@ public class MusicRecommendationController {
     @GetMapping("/stats/{userId}")
     public ResponseEntity<Map<String, Object>> getRecommendationStats(@PathVariable Long userId) {
         try {
-            // 사용자 프로필 기반 통계 생성
+            // 사용자 프로필 기반 통계
             var userProfile = userProfileService.getOrInit(userId);
             
-            // 기본 통계 (시뮬레이션)
             Map<String, Object> stats = Map.of(
                 "totalRecommendations", 150,
                 "favoriteGenresCount", userProfile.getFavoriteGenres().size(),
@@ -443,9 +422,9 @@ public class MusicRecommendationController {
     @GetMapping("/discovery/{userId}")
     public ResponseEntity<Map<String, Object>> getMusicDiscoveryRecommendations(@PathVariable Long userId) {
         try {
+            // 음악 발견 추천 (실제 구현 필요)
             var userProfile = userProfileService.getOrInit(userId);
             
-            // 사용자가 아직 탐험하지 않은 장르 제안
             List<String> currentGenres = userProfile.getFavoriteGenres().stream()
                 .map(genre -> (String) genre.get("name"))
                 .toList();
@@ -458,26 +437,15 @@ public class MusicRecommendationController {
                 .limit(3)
                 .toList();
             
-            // 발견 추천 생성
-            List<Map<String, Object>> discoveryTracks = new ArrayList<>();
-            for (String genre : newGenres) {
-                discoveryTracks.add(Map.of(
-                    "id", "discovery_" + genre.toLowerCase(),
-                    "name", "Discover " + genre,
-                    "artist", genre + " Gateway Artist",
-                    "album", "Introduction to " + genre,
-                    "genre", genre,
-                    "duration", "4:00",
-                    "popularity", 70,
-                    "discoveryReason", genre + " 장르를 탐험해보세요!"
-                ));
-            }
+            Map<String, Object> discoveryData = Map.of(
+                "newGenresToExplore", newGenres,
+                "discoveryRecommendations", recommendationEngine.getPersonalizedRecommendations(userId, 3)
+            );
             
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "userId", userId,
-                "newGenresToExplore", newGenres,
-                "discoveryRecommendations", discoveryTracks,
+                "discoveryData", discoveryData,
                 "message", "새로운 음악 발견을 위한 추천이 생성되었습니다",
                 "timestamp", java.time.Instant.now().toString()
             ));

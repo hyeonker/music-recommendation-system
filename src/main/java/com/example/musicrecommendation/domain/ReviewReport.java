@@ -47,7 +47,7 @@ public class ReviewReport {
     
     @PrePersist
     protected void onCreate() {
-        createdAt = OffsetDateTime.now();
+        createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
     }
     
     public enum ReportReason {

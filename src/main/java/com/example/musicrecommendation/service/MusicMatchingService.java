@@ -9,7 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -164,7 +164,7 @@ public class MusicMatchingService {
     /**
      * 향상된 다중 요소 유사도 계산 (좋아요 음악, 페스티벌 & 무드 포함)
      */
-    private double calculateEnhancedSimilarity(Long user1Id, Long user2Id) {
+    public double calculateEnhancedSimilarity(Long user1Id, Long user2Id) {
         double helpfulSimilarity = calculateHelpfulSimilarity(user1Id, user2Id);
         double likedSongsSimilarity = calculateLikedSongsSimilarity(user1Id, user2Id);
         double festivalSimilarity = calculateFestivalSimilarity(user1Id, user2Id);
@@ -639,7 +639,7 @@ public class MusicMatchingService {
                 .orElseThrow(() -> new RuntimeException("매칭을 찾을 수 없습니다."));
 
         match.setMatchStatus(status);
-        match.setLastInteractionAt(LocalDateTime.now());
+        match.setLastInteractionAt(OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul")));
 
         return userMatchRepository.save(match);
     }

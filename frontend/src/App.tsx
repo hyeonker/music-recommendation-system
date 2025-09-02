@@ -23,6 +23,7 @@ import { UserContext } from './context/UserContext';
 
 // Styles
 import './index.css';
+import './styles/legendary-animations.css';
 
 // Create a client for React Query with enhanced error handling
 const queryClient = new QueryClient({

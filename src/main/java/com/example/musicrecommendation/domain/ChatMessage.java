@@ -37,7 +37,7 @@ public class ChatMessage {
     @PrePersist
     void prePersist() {
         if (createdAt == null) {
-            createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+            createdAt = OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul"));
         }
     }
 }

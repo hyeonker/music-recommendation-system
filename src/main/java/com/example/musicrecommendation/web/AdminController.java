@@ -191,7 +191,7 @@ public class AdminController {
 
             report.setStatus(newStatus);
             if (newStatus != ReviewReport.ReportStatus.PENDING) {
-                report.setResolvedAt(OffsetDateTime.now());
+                report.setResolvedAt(OffsetDateTime.now(java.time.ZoneId.of("Asia/Seoul")));
                 
                 // 관리자 ID 설정
                 Long adminUserId = getUserId(oauth2User);

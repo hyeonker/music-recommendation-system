@@ -7,6 +7,16 @@ interface Review {
   id: number;
   userId: number;
   userNickname?: string;
+  representativeBadge?: {
+    id: number;
+    badgeType: string;
+    badgeName: string;
+    description: string;
+    iconUrl?: string;
+    rarity: string;
+    badgeColor: string;
+    earnedAt: string;
+  };
   musicItem: {
     id: number;
     name: string;
@@ -192,7 +202,52 @@ const ReviewCard: React.FC<ReviewCardProps> = ({
                 {formatDate(review.createdAt)}
               </span>
               {review.userNickname && (
-                <span>by {review.userNickname}</span>
+                <div className="flex items-center gap-2">
+                  <span>by {review.userNickname}</span>
+                  {review.representativeBadge && (
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium relative ${
+                      review.representativeBadge.rarity === 'LEGENDARY' 
+                        ? 'legendary-badge-glow legendary-review-border shadow-lg' 
+                        : ''
+                    }`} 
+                         style={{ 
+                           backgroundColor: `${review.representativeBadge.badgeColor}20`, 
+                           color: review.representativeBadge.badgeColor,
+                           boxShadow: review.representativeBadge.rarity === 'LEGENDARY' 
+                             ? `0 0 6px ${review.representativeBadge.badgeColor}40, 0 0 10px ${review.representativeBadge.badgeColor}25`
+                             : 'none',
+                           border: review.representativeBadge.rarity === 'LEGENDARY'
+                             ? `1px solid ${review.representativeBadge.badgeColor}60`
+                             : 'none'
+                         }}>
+                      {/* LEGENDARY 배지 반짝임 효과 */}
+                      {review.representativeBadge.rarity === 'LEGENDARY' && (
+                        <>
+                          <div className="absolute -inset-0.3 rounded-full animate-ping opacity-12"
+                               style={{ backgroundColor: review.representativeBadge.badgeColor }}></div>
+                          <div className="absolute top-0 left-0 w-full h-full rounded-full"
+                               style={{ 
+                                 background: `linear-gradient(45deg, transparent, ${review.representativeBadge.badgeColor}30, transparent, ${review.representativeBadge.badgeColor}20, transparent)`,
+                                 animation: 'legendary-wave 2s ease-in-out infinite'
+                               }}>
+                          </div>
+                        </>
+                      )}
+                      {review.representativeBadge.iconUrl && (
+                        <img src={review.representativeBadge.iconUrl} alt="" 
+                             className={`w-4 h-4 rounded-full relative z-10 ${
+                               review.representativeBadge.rarity === 'LEGENDARY' ? 'legendary-icon-float' : ''
+                             }`} />
+                      )}
+                      <span className={`relative z-10 font-bold ${
+                        review.representativeBadge.rarity === 'LEGENDARY' ? 'legendary-review-text' : ''
+                      }`}>{review.representativeBadge.badgeName}</span>
+                      {review.representativeBadge.rarity === 'LEGENDARY' && (
+                        <span className="legendary-sparkle text-yellow-300">✨</span>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
