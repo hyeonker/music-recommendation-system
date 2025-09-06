@@ -16,6 +16,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -36,7 +38,38 @@ public class AdminController {
     private final RecommendationLimitService recommendationLimitService;
 
     /**
-     * 관리자 권한 확인 - 보안 강화 버전
+     * 통합 관리자 권한 확인 - OAuth2 + 로컬 로그인 지원
+     */
+    private boolean isAdminUnified(OAuth2User oauth2User, HttpServletRequest request) {
+        log.info("=== 통합 관리자 권한 확인 시작 ===");
+        
+        // 1. OAuth2 로그인 확인
+        if (oauth2User != null) {
+            log.info("OAuth2 사용자 감지");
+            return isAdmin(oauth2User);
+        }
+        
+        // 2. 로컬 로그인 확인
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            Long userId = (Long) session.getAttribute("userId");
+            String authProvider = (String) session.getAttribute("authProvider");
+            
+            log.info("로컬 세션 감지 - userId: {}, authProvider: {}", userId, authProvider);
+            
+            if (userId != null && "LOCAL".equals(authProvider)) {
+                boolean isAdmin = userService.isAdmin(userId);
+                log.info("로컬 사용자 관리자 권한 확인 결과: {}", isAdmin);
+                return isAdmin;
+            }
+        }
+        
+        log.warn("인증되지 않은 사용자 또는 권한 없음");
+        return false;
+    }
+
+    /**
+     * 관리자 권한 확인 - OAuth2 전용 (기존 메서드 유지)
      */
     private boolean isAdmin(OAuth2User oauth2User) {
         if (oauth2User == null) return false;
@@ -95,9 +128,10 @@ public class AdminController {
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDirection,
             @RequestParam(required = false) String status,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
         
-        if (!isAdmin(oauth2User)) {
+        if (!isAdminUnified(oauth2User, request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                 "success", false,
                 "message", "관리자 권한이 필요합니다."
@@ -133,9 +167,10 @@ public class AdminController {
     public ResponseEntity<?> getPendingReports(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
         
-        if (!isAdmin(oauth2User)) {
+        if (!isAdminUnified(oauth2User, request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                 "success", false,
                 "message", "관리자 권한이 필요합니다."
@@ -163,14 +198,15 @@ public class AdminController {
     public ResponseEntity<?> updateReportStatus(
             @PathVariable Long reportId,
             @RequestBody Map<String, Object> updateRequest,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
         
         log.info("=== 상태 업데이트 요청 받음 ===");
         log.info("reportId: {}", reportId);
         log.info("updateRequest: {}", updateRequest);
         log.info("oauth2User가 null인가?: {}", oauth2User == null);
         
-        if (!isAdmin(oauth2User)) {
+        if (!isAdminUnified(oauth2User, request)) {
             log.error("관리자 권한 확인 실패");
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                 "success", false,
@@ -231,9 +267,10 @@ public class AdminController {
     @PostMapping("/reset-daily-limit/{userId}")
     public ResponseEntity<?> resetUserDailyLimit(
             @PathVariable Long userId,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
         
-        if (!isAdmin(oauth2User)) {
+        if (!isAdminUnified(oauth2User, request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                 "success", false,
                 "message", "관리자 권한이 필요합니다."
@@ -262,8 +299,10 @@ public class AdminController {
      * 신고 통계 조회
      */
     @GetMapping("/reports/stats")
-    public ResponseEntity<?> getReportStats(@AuthenticationPrincipal OAuth2User oauth2User) {
-        if (!isAdmin(oauth2User)) {
+    public ResponseEntity<?> getReportStats(
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
+        if (!isAdminUnified(oauth2User, request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
                 "success", false,
                 "message", "관리자 권한이 필요합니다."

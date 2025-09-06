@@ -49,4 +49,16 @@ public interface UserMatchRepository extends JpaRepository<UserMatch, Long> {
      */
     @Query("SELECT COUNT(um) FROM UserMatch um WHERE um.matchStatus = :status")
     Long countByStatus(@Param("status") String status);
+
+    /**
+     * 특정 사용자의 총 매칭 횟수 조회 (user1 또는 user2로 참여한 모든 매칭)
+     */
+    @Query("SELECT COUNT(um) FROM UserMatch um WHERE um.user1Id = :userId OR um.user2Id = :userId")
+    Long countMatchesByUserId(@Param("userId") Long userId);
+
+    /**
+     * 특정 사용자의 성공한 매칭 횟수 조회 (MATCHED 상태만)
+     */
+    @Query("SELECT COUNT(um) FROM UserMatch um WHERE (um.user1Id = :userId OR um.user2Id = :userId) AND um.matchStatus = 'MATCHED'")
+    Long countSuccessfulMatchesByUserId(@Param("userId") Long userId);
 }

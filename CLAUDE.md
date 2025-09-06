@@ -25,6 +25,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Backend tests**: `./gradlew test`
 - **Frontend tests**: `cd frontend && npm test`
 - **Backend with coverage**: `./gradlew test jacocoTestReport`
+- **Single test class**: `./gradlew test --tests ClassName`
+- **Single test method**: `./gradlew test --tests ClassName.methodName`
 
 ## Architecture Overview
 
@@ -115,3 +117,5 @@ com.example.musicrecommendation/
 - Frontend uses proxy to backend in development (port 3000 → 9090)
 - Docker setup uses `docker` profile and different port (18080)
 - Chat messages are encrypted using AES (configured in application.yml)
+- OAuth2 credentials for local development are configurable via environment variables
+- Spotify API integration uses client credentials flow (keys in application-local.yml)

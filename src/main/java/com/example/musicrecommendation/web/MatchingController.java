@@ -140,6 +140,38 @@ public class MatchingController {
     }
 
     /**
+     * 개인별 매칭 통계 조회
+     */
+    @GetMapping("/stats/user/{userId}")
+    @Operation(summary = "개인 매칭 통계", description = "특정 사용자의 매칭 통계를 조회합니다")
+    public ResponseEntity<?> getUserMatchingStats(@Parameter(description = "사용자 ID") @PathVariable Long userId) {
+        try {
+            // 총 매칭 횟수 (모든 상태 포함)
+            Long totalMatchCount = musicMatchingService.getUserTotalMatchCount(userId);
+            
+            // 성공한 매칭 횟수 (MATCHED 상태만)
+            Long successfulMatchCount = musicMatchingService.getUserSuccessfulMatchCount(userId);
+            
+            final Long currentUserId = userId;
+            final Long totalCount = totalMatchCount;
+            final Long successfulCount = successfulMatchCount;
+            
+            return ResponseEntity.ok(new Object() {
+                public final Long userId = currentUserId;
+                public final Long totalMatches = totalCount;
+                public final Long successfulMatches = successfulCount;
+                public final String message = "사용자 매칭 통계 조회 성공";
+                public final String timestamp = java.time.LocalDateTime.now().toString();
+            });
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(new Object() {
+                public final String error = "매칭 통계 조회 실패: " + e.getMessage();
+                public final String timestamp = java.time.LocalDateTime.now().toString();
+            });
+        }
+    }
+
+    /**
      * UserMatch를 MatchDto로 변환
      */
     private MatchingResponse.MatchDto convertToMatchDto(UserMatch match) {

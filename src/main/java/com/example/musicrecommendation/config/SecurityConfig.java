@@ -41,7 +41,7 @@ public class SecurityConfig {
                                 "/favicon.ico",               // 파비콘 404 소음 제거
                                 "/ws/**", "/ws-native/**",    // SockJS/WS 핸드셰이크 & 폴링
                                 "/oauth2/**", "/login/**",
-                                "/api/auth/**",
+                                "/api/auth/**", "/api/auth/local/**",
                                 "/api/public/**",
                                 "/api/realtime-matching/**",  // 매칭 API 허용
                                 "/api/chat/**",               // 채팅 API 허용
@@ -57,6 +57,7 @@ public class SecurityConfig {
                                 "/api/reviews/tags",          // 태그 목록 조회 허용
                                 "/api/badges/**",             // 배지 API 허용 (디버그용)
                                 "/api/likes/**",              // 좋아요 API 허용
+                                "/api/admin/**",              // 관리자 API 허용 (컨트롤러에서 권한 체크)
                                 "/actuator/**",
                                 "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**"
                         ).permitAll()
@@ -77,7 +78,8 @@ public class SecurityConfig {
                         new AntPathRequestMatcher("/api/recommendations/**"),
                         new AntPathRequestMatcher("/api/likes/**"),
                         new AntPathRequestMatcher("/api/admin/**"),
-                        new AntPathRequestMatcher("/api/notifications/**")
+                        new AntPathRequestMatcher("/api/notifications/**"),
+                        new AntPathRequestMatcher("/api/auth/local/**")
                 ))
 
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))

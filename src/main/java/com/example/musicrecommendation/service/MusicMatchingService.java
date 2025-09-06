@@ -657,4 +657,18 @@ public class MusicMatchingService {
     public List<UserMatch> getTopMatches(Long userId, int limit) {
         return userMatchRepository.findTopMatchesByUserId(userId, limit);
     }
+
+    /**
+     * 사용자의 총 매칭 횟수 조회 (모든 상태 포함)
+     */
+    public Long getUserTotalMatchCount(Long userId) {
+        return userMatchRepository.countMatchesByUserId(userId);
+    }
+
+    /**
+     * 사용자의 성공한 매칭 횟수 조회 (MATCHED 상태만)
+     */
+    public Long getUserSuccessfulMatchCount(Long userId) {
+        return userMatchRepository.countSuccessfulMatchesByUserId(userId);
+    }
 }

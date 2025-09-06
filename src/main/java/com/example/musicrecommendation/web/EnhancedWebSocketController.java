@@ -115,62 +115,43 @@ public class EnhancedWebSocketController {
             log.info("[WS] MatchingQueueService 결과: {}", result.toString());
             log.info("[WS] send /queue/matching-result userId={}", finalUserId);
             
-            // 매칭 큐에 추가 후 즉시 매칭 시도
-            log.info("[WS] 매칭 큐 추가 후 동기 매칭 프로세스 실행");
-            boolean matchingSuccess = matchingQueueService.processMatchingSync();
-            log.info("[WS] 동기 매칭 결과: {}", matchingSuccess);
-            
-            // 매칭 성공 여부 확인 - 매칭된 사용자인지 체크
-            boolean isUserMatched = matchingQueueService.isUserMatched(finalUserId);
-            log.info("[WS] 사용자 {} 매칭 상태: {}", finalUserId, isUserMatched);
-            
             // Reflection을 사용해서 결과 객체의 필드 직접 확인
             boolean isSuccess = true; // 기본값
-            String status = isUserMatched ? "MATCHED" : "WAITING"; // 매칭 상태에 따라 결정
-            String message = isUserMatched ? "매칭이 성공했습니다!" : "매칭 요청이 처리되었습니다";
+            String status = "WAITING"; // 기본적으로 WAITING 상태
+            String message = "매칭 요청이 처리되었습니다";
             
             try {
-                // 매칭 상태가 확인되었다면 그 값을 우선 사용
-                if (isUserMatched) {
-                    // 이미 위에서 설정했으므로 추가 처리 불필요
-                    log.info("[WS] 매칭 성공 확인됨, status=MATCHED 유지");
-                } else {
-                    // success 필드 확인
-                    java.lang.reflect.Field successField = result.getClass().getDeclaredField("success");
-                    successField.setAccessible(true);
-                    isSuccess = (Boolean) successField.get(result);
-                    
-                    // status 필드 확인 (매칭되지 않은 경우만)
-                    java.lang.reflect.Field statusField = result.getClass().getDeclaredField("status");
-                    statusField.setAccessible(true);
-                    String reflectionStatus = (String) statusField.get(result);
-                    
-                    // message 필드 확인
-                    java.lang.reflect.Field messageField = result.getClass().getDeclaredField("message");
-                    messageField.setAccessible(true);
-                    String reflectionMessage = (String) messageField.get(result);
-                    
-                    // 매칭되지 않은 경우에만 reflection 결과 사용
-                    if ("WAITING".equals(status)) {
-                        status = reflectionStatus;
-                        message = reflectionMessage;
-                    }
-                }
+                // success 필드 확인
+                java.lang.reflect.Field successField = result.getClass().getDeclaredField("success");
+                successField.setAccessible(true);
+                isSuccess = (Boolean) successField.get(result);
+                
+                // status 필드 확인
+                java.lang.reflect.Field statusField = result.getClass().getDeclaredField("status");
+                statusField.setAccessible(true);
+                String reflectionStatus = (String) statusField.get(result);
+                
+                // message 필드 확인
+                java.lang.reflect.Field messageField = result.getClass().getDeclaredField("message");
+                messageField.setAccessible(true);
+                String reflectionMessage = (String) messageField.get(result);
+                
+                // reflection 결과 사용
+                status = reflectionStatus;
+                message = reflectionMessage;
                 
                 log.info("[WS] 최종 처리 결과: success={}, status={}, message={}", isSuccess, status, message);
                 
             } catch (Exception e) {
                 log.warn("[WS] Reflection 실패, 기본값 사용: {}", e.getMessage());
-                // 문자열 파싱으로 fallback (매칭되지 않은 경우만)
-                if (!isUserMatched) {
-                    String resultString = result.toString();
-                    if (resultString.contains("ALREADY_MATCHED")) {
-                        status = "MATCHED";
-                        isSuccess = false;
-                    } else if (resultString.contains("ALREADY_WAITING")) {
-                        status = "WAITING";
-                        isSuccess = true;
-                    }
+                // 문자열 파싱으로 fallback
+                String resultString = result.toString();
+                if (resultString.contains("ALREADY_MATCHED")) {
+                    status = "MATCHED";
+                    isSuccess = false;
+                } else if (resultString.contains("ALREADY_WAITING")) {
+                    status = "WAITING";
+                    isSuccess = true;
                 }
             }
             

@@ -1,6 +1,6 @@
 // frontend/src/pages/Matching.tsx
 import React, { useState, useEffect } from 'react';
-import { Users, Heart, Music, Search, Clock, X, Check, Zap } from 'lucide-react';
+import { Users, Heart, Music, Search, Clock, X, Check, Zap, RefreshCw, AlertCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useSocket } from '../context/SocketContext';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +25,16 @@ const Matching: React.FC = () => {
     const [queuePosition, setQueuePosition] = useState(0);
     const [isMatching, setIsMatching] = useState(false);
 
+    // 매칭 시스템 현황 상태
+    const [systemStats, setSystemStats] = useState({
+        totalWaiting: 0,
+        totalMatched: 0,
+        onlineUsers: 0
+    });
+    const [nextUpdateCountdown, setNextUpdateCountdown] = useState<number>(30);
+    const [lastUpdateTime, setLastUpdateTime] = useState<string>('');
+    const [statsUpdateError, setStatsUpdateError] = useState<boolean>(false);
+
     const { isConnected, requestMatching } = useSocket();
     const navigate = useNavigate();
 
@@ -37,12 +47,29 @@ const Matching: React.FC = () => {
     useEffect(() => {
         (async () => {
             try {
+                // OAuth 인증 확인
                 const { data } = await api.get('/api/auth/me');
+                console.log('🔍 OAuth 인증 응답:', data);
                 if (data?.authenticated && data?.user?.id) {
+                    console.log('✅ OAuth 인증 성공, userId 설정:', data.user.id);
                     setUserId(Number(data.user.id));
+                } else {
+                    // 로컬 인증 확인
+                    try {
+                        const localAuthResponse = await api.get('/api/auth/local/me');
+                        console.log('🔍 로컬 인증 응답:', localAuthResponse.data);
+                        if (localAuthResponse.data?.success && localAuthResponse.data?.user?.id) {
+                            console.log('✅ 로컬 인증 성공, userId 설정:', localAuthResponse.data.user.id);
+                            setUserId(Number(localAuthResponse.data.user.id));
+                        } else {
+                            console.log('❌ 로컬 인증 실패, userId=1 유지');
+                        }
+                    } catch (localError) {
+                        console.log('❌ 로컬 인증 오류:', localError);
+                    }
                 }
-            } catch {
-                // fallback: keep 1
+            } catch (oauthError) {
+                console.log('❌ OAuth 인증 오류:', oauthError);
             }
             
             // 🧹 기존 데이터 클리어 - 새로운 UUID 기반 시스템으로 완전 전환
@@ -57,16 +84,13 @@ const Matching: React.FC = () => {
     const clearLegacyData = () => {
         const lastRoomId = sessionStorage.getItem('lastRoomId');
         
-        // 기존 숫자형 roomId인 경우 클리어
+        // 기존 숫자형 roomId인 경우 클리어 (중복 메시지 방지를 위해 로그만)
         if (lastRoomId && /^\d+$/.test(lastRoomId)) {
             console.log('🧹 기존 숫자형 roomId 클리어:', lastRoomId);
             sessionStorage.removeItem('lastRoomId');
             sessionStorage.removeItem('matchedUser');
             localStorage.removeItem('chatRoomId');
-            toast.success('새로운 보안 채팅 시스템으로 업그레이드되었습니다! 새로운 매칭을 시작하세요.', {
-                duration: 4000,
-                icon: '🔒'
-            });
+            // 토스트 메시지 제거 - 중복 메시지 방지
         }
     };
 
@@ -80,23 +104,30 @@ const Matching: React.FC = () => {
         };
     }, [matchingStatus]);
 
-    // WebSocket 커스텀 이벤트 리스너
+    // WebSocket 커스텀 이벤트 리스너 (강화된 중복 방지)
     useEffect(() => {
+        let processedEvents = new Set<string>(); // 처리된 이벤트 추적
+        
         const handleMatchingSuccess = (event: any) => {
-            console.log('매칭 성공 이벤트 받음:', event.detail);
-            
-            // Event 기반 데이터 구조에 맞게 수정
             const data = event?.detail;
             const roomId = data?.roomId || data?.matchedUser?.roomId;
-            const matchedUserData = data?.matchedUser || { id: 2, name: '음악친구' };
+            const eventKey = `${roomId}_${data?.matchedUser?.id || 'unknown'}`;
             
+            // 이미 처리된 이벤트인지 확인
+            if (processedEvents.has(eventKey)) {
+                console.log('🔄 중복된 매칭 성공 이벤트 무시:', eventKey);
+                return;
+            }
+            
+            processedEvents.add(eventKey);
+            console.log('🎉 새로운 매칭 성공 이벤트 처리:', eventKey, event.detail);
+            
+            const matchedUserData = data?.matchedUser || { id: 2, name: '음악친구' };
             const mUser = {
                 id: matchedUserData.id,
                 name: matchedUserData.name,
                 chatRoomId: roomId
             };
-            
-            console.log('매칭된 사용자 정보:', mUser, '방 ID:', roomId);
             
             setMatchingStatus('MATCHED');
             setMatchedUser(mUser);
@@ -106,12 +137,17 @@ const Matching: React.FC = () => {
                 sessionStorage.setItem('lastRoomId', String(roomId));
             }
             sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
+            
+            // 매칭 성공 토스트는 SocketContext에서 이미 처리됨 - 중복 방지
+            console.log('✅ 매칭 상태 업데이트 완료 (토스트는 SocketContext에서 처리)');
         };
 
         const handleMatchingFailed = () => {
+            console.log('❌ 매칭 실패 처리');
             setMatchingStatus('IDLE');
         };
 
+        // 이벤트 리스너 등록
         window.addEventListener('matchingSuccess', handleMatchingSuccess as EventListener);
         window.addEventListener('matchingFailed', handleMatchingFailed as EventListener);
 
@@ -122,10 +158,51 @@ const Matching: React.FC = () => {
     }, []);
 
     const checkMatchingStatus = async () => {
-        try {
-            const { data } = await api.get(`/api/realtime-matching/status/${userId}`);
-            const status: MatchStatus = data?.status || 'IDLE';
+        // 🛡️ 안전 장치: 이미 매칭 중이거나 처리 중이면 중복 호출 방지
+        if (isMatching || matchingStatus === 'WAITING') {
+            console.log(`🔒 매칭 상태 확인 건너뜀 - 현재 상태: ${matchingStatus}, 처리 중: ${isMatching}`);
+            return;
+        }
 
+        try {
+            console.log(`📋 안전한 매칭 상태 확인 시작 - User ${userId}`);
+            
+            // 세션 스토리지에서 기존 매칭 정보 먼저 확인
+            const cachedRoomId = sessionStorage.getItem('lastRoomId');
+            const cachedMatchedUser = sessionStorage.getItem('matchedUser');
+            
+            if (cachedRoomId && cachedMatchedUser && cachedRoomId !== 'null') {
+                try {
+                    const parsedUser = JSON.parse(cachedMatchedUser);
+                    console.log('💾 캐시된 매칭 정보 복원:', { roomId: cachedRoomId, user: parsedUser });
+                    
+                    setMatchingStatus('MATCHED');
+                    setMatchedUser({
+                        id: parsedUser.id,
+                        name: parsedUser.name,
+                        chatRoomId: cachedRoomId
+                    });
+                    console.log('✅ 캐시 기반 매칭 상태 복원 완료 (API 호출 없음)');
+                    return; // API 호출 완전 회피
+                } catch (parseError) {
+                    console.warn('캐시 파싱 실패, API 호출로 폴백:', parseError);
+                }
+            }
+
+            // 캐시가 없을 때만 조심스럽게 API 호출
+            console.log('🌐 캐시 없음, 신중한 API 호출 시작...');
+            
+            const { data } = await api.get(`/api/realtime-matching/status/${userId}`, {
+                timeout: 3000, // 3초 타임아웃
+                headers: {
+                    'X-Request-Type': 'STATUS_CHECK_ONLY' // 백엔드에 의도 명시
+                }
+            });
+            
+            const status: MatchStatus = data?.status || 'IDLE';
+            console.log(`📊 API 응답 - User ${userId}: ${status}`, data);
+
+            // 상태별 처리
             setMatchingStatus(status);
             if (status === 'MATCHED') {
                 const roomId = data?.roomId;
@@ -135,17 +212,24 @@ const Matching: React.FC = () => {
                     chatRoomId: roomId,
                 };
                 setMatchedUser(mUser);
+                
+                console.log(`✅ 서버 기존 매칭 발견 - User ${userId} <-> User ${data?.matchedWith}, Room: ${roomId}`);
 
-                // ✅ 세션 저장
+                // 세션에 저장하여 다음번엔 API 호출 회피
                 if (roomId) {
                     sessionStorage.setItem('lastRoomId', String(roomId));
                 }
                 sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
             } else if (status === 'WAITING') {
                 setQueuePosition(data?.queuePosition || 0);
+                console.log(`⏳ 서버 대기 상태 발견 - User ${userId}, Queue Position: ${data?.queuePosition}`);
+            } else {
+                console.log(`💤 서버 유휴 상태 확인 - User ${userId}`);
             }
         } catch (error) {
             console.error('매칭 상태 확인 오류:', error);
+            // 에러 시 안전한 기본 상태
+            setMatchingStatus('IDLE');
         }
     };
 
@@ -225,6 +309,63 @@ const Matching: React.FC = () => {
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
+
+    // 매칭 시스템 현황 업데이트 (실시간 데이터)
+    const updateSystemStats = async () => {
+        try {
+            const response = await api.get('/api/realtime-matching/system-status');
+            if (response.data) {
+                const stats = response.data;
+                const totalWaiting = stats.matchingSystem?.statistics?.totalWaiting ?? 0;
+                const totalMatched = stats.matchingSystem?.statistics?.totalMatched ?? 0;
+                
+                // 온라인 사용자 수 = 매칭 대기 중인 사용자 + 매칭 완료된 사용자들 (매칭 완료 1쌍 = 2명)
+                const onlineUsers = totalWaiting + (totalMatched * 2);
+                
+                setSystemStats({
+                    totalWaiting: totalWaiting,
+                    totalMatched: totalMatched,
+                    onlineUsers: onlineUsers
+                });
+                setLastUpdateTime(new Date().toLocaleTimeString());
+                setStatsUpdateError(false);
+                console.log('🔄 매칭 시스템 현황 업데이트:', new Date().toLocaleTimeString());
+                console.log(`📊 실제 온라인 계산: 대기(${totalWaiting}) + 매칭완료(${totalMatched} × 2) = ${onlineUsers}명`);
+            }
+        } catch (error) {
+            console.warn('매칭 시스템 현황 업데이트 실패:', error);
+            setStatsUpdateError(true);
+        }
+    };
+
+    // 매칭 시스템 현황 자동 갱신 (30초마다) + 카운트다운
+    useEffect(() => {
+        // 초기 데이터 로드
+        updateSystemStats();
+        setNextUpdateCountdown(30);
+        setLastUpdateTime(new Date().toLocaleTimeString());
+        
+        // 30초마다 시스템 현황 업데이트
+        const updateInterval = setInterval(() => {
+            updateSystemStats();
+            setNextUpdateCountdown(30); // 카운트다운 리셋
+        }, 30000);
+        
+        // 1초마다 카운트다운 감소
+        const countdownInterval = setInterval(() => {
+            setNextUpdateCountdown(prev => {
+                if (prev <= 1) {
+                    return 30; // 리셋
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        
+        return () => {
+            clearInterval(updateInterval);
+            clearInterval(countdownInterval);
+        };
+    }, []);
 
     // 매칭된 사용자가 변경될 때 배지 및 사용자 정보 로드
     useEffect(() => {
@@ -509,25 +650,41 @@ const Matching: React.FC = () => {
                 </div>
             )}
 
-            {/* 시스템 상태 (데모) */}
+            {/* 매칭 시스템 현황 (실시간 데이터) */}
             <div className="glass-card p-6">
-                <h3 className="font-bold text-gray-800 dark:text-white mb-4">매칭 시스템 현황</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-gray-800 dark:text-white">매칭 시스템 현황</h3>
+                    <div className="flex items-center space-x-2 text-sm">
+                        {statsUpdateError ? (
+                            <div className="flex items-center space-x-1 text-red-400">
+                                <AlertCircle className="w-4 h-4" />
+                                <span>업데이트 실패</span>
+                            </div>
+                        ) : (
+                            <div className="flex items-center space-x-2 text-blue-200">
+                                <RefreshCw className="w-4 h-4" />
+                                <span>{nextUpdateCountdown}초 후 새로운 데이터로 갱신됩니다</span>
+                            </div>
+                        )}
+                        {lastUpdateTime && (
+                            <span className="text-gray-400 text-xs">
+                                (마지막 업데이트: {lastUpdateTime})
+                            </span>
+                        )}
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
                     <div>
-                        <p className="text-2xl font-bold text-blue-500">25</p>
+                        <p className="text-2xl font-bold text-blue-500">{systemStats.totalWaiting}</p>
                         <p className="text-gray-600 dark:text-gray-400 text-sm">대기 중</p>
                     </div>
                     <div>
-                        <p className="text-2xl font-bold text-green-500">12</p>
+                        <p className="text-2xl font-bold text-green-500">{systemStats.totalMatched}</p>
                         <p className="text-gray-600 dark:text-gray-400 text-sm">매칭 완료</p>
                     </div>
                     <div>
-                        <p className="text-2xl font-bold text-purple-500">87</p>
+                        <p className="text-2xl font-bold text-purple-500">{systemStats.onlineUsers}</p>
                         <p className="text-gray-600 dark:text-gray-400 text-sm">온라인</p>
-                    </div>
-                    <div>
-                        <p className="text-2xl font-bold text-pink-500">95%</p>
-                        <p className="text-gray-600 dark:text-gray-400 text-sm">만족도</p>
                     </div>
                 </div>
             </div>

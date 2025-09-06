@@ -31,25 +31,47 @@ export class WebSocketManager {
     private onMessageHandler?: (message: WebSocketMessage) => void;
     private onChatMessageHandler?: (message: ChatMessage) => void;
 
-    constructor() {
+    constructor(userId?: string) {
+        if (userId) {
+            this.currentUserId = userId;
+            console.log('🚀 WebSocketManager 사용자 ID 설정:', userId);
+        }
+        // 초기화만 하고 연결은 외부에서 호출하도록 변경
         this.initializeUserId().then(() => {
             this.setupClient();
-            // 클라이언트 설정 후 즉시 연결 시도
-            console.log('🚀 WebSocketManager 초기화 후 연결 시작');
-            this.connect();
+            console.log('🚀 WebSocketManager 초기화 완료, 연결 대기');
         });
     }
 
     private async initializeUserId() {
+        // 생성자에서 이미 ID가 설정되었으면 추가 인증 불필요
+        if (this.currentUserId !== '1') {
+            console.log('WebSocketManager: 사용자 ID 이미 설정됨:', this.currentUserId);
+            return;
+        }
+        
         try {
+            // OAuth 인증 확인
             const response = await fetch('/api/auth/me');
             const data = await response.json();
             if (data?.authenticated && data?.user?.id) {
                 this.currentUserId = data.user.id.toString();
-                console.log('WebSocketManager: 현재 사용자 ID 설정됨:', this.currentUserId);
+                console.log('WebSocketManager: OAuth 사용자 ID 설정됨:', this.currentUserId);
+            } else {
+                // 로컬 인증 확인
+                try {
+                    const localResponse = await fetch('/api/auth/local/me');
+                    const localData = await localResponse.json();
+                    if (localData?.success && localData?.user?.id) {
+                        this.currentUserId = localData.user.id.toString();
+                        console.log('WebSocketManager: 로컬 사용자 ID 설정됨:', this.currentUserId);
+                    }
+                } catch (localError) {
+                    console.error('WebSocketManager: 로컬 인증 확인 실패:', localError);
+                }
             }
         } catch (error) {
-            console.error('WebSocketManager: 사용자 ID 가져오기 실패:', error);
+            console.error('WebSocketManager: OAuth 인증 확인 실패:', error);
         }
     }
 
@@ -168,11 +190,10 @@ export class WebSocketManager {
                 console.log('  - data.type:', data.type);
                 console.log('  - data.matchingResult:', data.matchingResult);
                 
-                // status가 "WAITING"이면 대기 상태로 처리 (하지만 계속 매칭 성공 메시지 기다림)
+                // status가 "WAITING"이면 대기 상태로 처리하고 즉시 return
                 if (data.status === 'WAITING') {
-                    console.log('⏳ 매칭 대기 상태 - 매칭 성공 메시지 대기중');
-                    // 대기 상태지만 매칭 성공 메시지를 기다리므로 return하지 않음
-                    // 대신 아래 매칭 성공 조건 체크 계속 진행
+                    console.log('⏳ 매칭 대기 상태 - 매칭 성공 처리하지 않음');
+                    return; // WAITING 상태일 때는 매칭 성공 처리 중단
                 }
                 
                 // 매칭 성공 처리 - Event 기반 데이터 구조 고려

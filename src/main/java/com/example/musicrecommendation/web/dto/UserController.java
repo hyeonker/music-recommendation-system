@@ -16,6 +16,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 
 import java.util.List;
 import java.util.Map;
@@ -257,23 +259,40 @@ public class UserController {
     }
     
     /**
-     * 현재 로그인한 사용자 정보 조회
+     * 현재 로그인한 사용자 정보 조회 - OAuth2 + 로컬 로그인 지원
      */
     @GetMapping("/me")
     @Operation(summary = "내 정보 조회", description = "현재 로그인한 사용자의 정보를 조회합니다.")
-    public ResponseEntity<UserResponse> getMyInfo(@AuthenticationPrincipal OAuth2User oauth2User) {
-        if (oauth2User == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+    public ResponseEntity<UserResponse> getMyInfo(
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
+        
+        // 1. OAuth2 로그인 확인
+        if (oauth2User != null) {
+            String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+            if (email == null) {
+                return ResponseEntity.badRequest().build();
+            }
+            
+            return userService.findUserByEmail(email)
+                    .map(user -> ResponseEntity.ok(UserResponse.from(user)))
+                    .orElse(ResponseEntity.notFound().build());
         }
         
-        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
-        if (email == null) {
-            return ResponseEntity.badRequest().build();
+        // 2. 로컬 로그인 확인
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            Long userId = (Long) session.getAttribute("userId");
+            String authProvider = (String) session.getAttribute("authProvider");
+            
+            if (userId != null && "LOCAL".equals(authProvider)) {
+                return userService.findUserById(userId)
+                        .map(user -> ResponseEntity.ok(UserResponse.from(user)))
+                        .orElse(ResponseEntity.notFound().build());
+            }
         }
         
-        return userService.findUserByEmail(email)
-                .map(user -> ResponseEntity.ok(UserResponse.from(user)))
-                .orElse(ResponseEntity.notFound().build());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
     }
     
     /**

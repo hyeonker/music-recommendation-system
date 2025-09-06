@@ -16,6 +16,8 @@ import MusicDiscovery from './pages/MusicDiscovery';
 import LoadingSpinner from './components/LoadingSpinner';
 import RequireAuth from './components/RequireAuth';   // ⭐ 추가: 로그인 가드
 import SocialAuth from './components/SocialAuth';     // ⭐ 선택: /login 전용 페이지에서 사용
+import Login from './pages/Login';                    // ⭐ 새로운 로그인 페이지
+import Signup from './pages/Signup';                  // ⭐ 새로운 회원가입 페이지
 
 // Context
 import { SocketProvider } from './context/SocketContext';
@@ -116,15 +118,68 @@ function App() {
                                 <main className="flex-1 container mx-auto px-4 py-6 max-w-7xl">
                                     <Routes>
                                         <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                                        <Route path="/dashboard" element={<Dashboard />} />
-                                        <Route path="/matching" element={<Matching />} />
-                                        <Route path="/chat" element={<Chat />} />
-                                        <Route path="/stats" element={<Stats />} />
-                                        <Route path="/reviews" element={<Reviews />} />
-                                        <Route path="/music" element={<MusicDiscovery />} />
-                                        <Route path="/admin" element={<AdminPanel />} />
-
-                                        {/* ⭐ 로그인 필요: /profile */}
+                                        
+                                        {/* ⭐ 로그인 필요: 홈/대시보드 */}
+                                        <Route
+                                            path="/dashboard"
+                                            element={
+                                                <RequireAuth>
+                                                    <Dashboard />
+                                                </RequireAuth>
+                                            }
+                                        />
+                                        
+                                        {/* ⭐ 로그인 필요: 매칭 */}
+                                        <Route
+                                            path="/matching"
+                                            element={
+                                                <RequireAuth>
+                                                    <Matching />
+                                                </RequireAuth>
+                                            }
+                                        />
+                                        
+                                        {/* ⭐ 로그인 필요: 채팅 */}
+                                        <Route
+                                            path="/chat"
+                                            element={
+                                                <RequireAuth>
+                                                    <Chat />
+                                                </RequireAuth>
+                                            }
+                                        />
+                                        
+                                        {/* ⭐ 로그인 필요: 통계 */}
+                                        <Route
+                                            path="/stats"
+                                            element={
+                                                <RequireAuth>
+                                                    <Stats />
+                                                </RequireAuth>
+                                            }
+                                        />
+                                        
+                                        {/* ⭐ 로그인 필요: 리뷰 */}
+                                        <Route
+                                            path="/reviews"
+                                            element={
+                                                <RequireAuth>
+                                                    <Reviews />
+                                                </RequireAuth>
+                                            }
+                                        />
+                                        
+                                        {/* ⭐ 로그인 필요: 음악탐색 */}
+                                        <Route
+                                            path="/music"
+                                            element={
+                                                <RequireAuth>
+                                                    <MusicDiscovery />
+                                                </RequireAuth>
+                                            }
+                                        />
+                                        
+                                        {/* ⭐ 로그인 필요: 프로필 */}
                                         <Route
                                             path="/profile"
                                             element={
@@ -133,9 +188,15 @@ function App() {
                                                 </RequireAuth>
                                             }
                                         />
+                                        
+                                        <Route path="/admin" element={<AdminPanel />} />
 
-                                        {/* ⭐ 선택: 직접 /login 접근 시 소셜 로그인 카드만 보여주고 싶다면 */}
-                                        <Route path="/login" element={<SocialAuth />} />
+                                        {/* ⭐ 새로운 로그인/회원가입 페이지 */}
+                                        <Route path="/login" element={<Login />} />
+                                        <Route path="/signup" element={<Signup />} />
+                                        
+                                        {/* ⭐ 기존 소셜 로그인만 (필요시) */}
+                                        <Route path="/auth/social" element={<SocialAuth />} />
 
                                         {/* 404 처리 (선택) */}
                                         {/* <Route path="*" element={<Navigate to="/dashboard" replace />} /> */}

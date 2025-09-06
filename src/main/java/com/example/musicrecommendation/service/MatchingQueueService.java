@@ -50,21 +50,13 @@ public class MatchingQueueService {
         System.out.println("=== 매칭 요청 시작 ===");
         System.out.println("요청 사용자 ID: " + userId);
         
-        // 이미 매칭 대기 중인지 확인
-        if (waitingUsers.containsKey(userId)) {
-            System.out.println("사용자 " + userId + "는 이미 대기 중, 매칭 프로세스 재실행");
-            
-            // 이미 대기 중이어도 매칭 프로세스를 다시 실행 (다른 사용자와 매칭 시도)
-            processMatchingSync();
-            
-            return new Object() {
-                public final boolean success = true;
-                public final String message = "매칭 대기 중입니다. 다른 사용자를 찾는 중...";
-                public final String status = "WAITING";
-                public final LocalDateTime waitingSince = waitingUsers.get(userId);
-            };
+        // 상태 정리: 이미 매칭된 사용자가 waitingUsers에 있으면 제거 (상태 불일치 해결)
+        if (matchedUsers.containsKey(userId) && waitingUsers.containsKey(userId)) {
+            System.out.println("⚠️ 상태 불일치 감지: 매칭된 사용자 " + userId + "가 대기열에 있음 - 정리 중");
+            waitingUsers.remove(userId);
+            matchingQueue.remove(userId);
         }
-
+        
         // 이미 매칭된 사용자인지 확인
         if (matchedUsers.containsKey(userId)) {
             Long matchedUserId = matchedUsers.get(userId);
@@ -78,6 +70,21 @@ public class MatchingQueueService {
                 private final SecureChatRoomService.ChatRoomCreationResult roomResult = 
                     secureChatRoomService.createSecureChatRoom(userId, matchedUserId);
                 public final String chatRoomId = roomResult.getRoomId();
+            };
+        }
+        
+        // 이미 매칭 대기 중인지 확인
+        if (waitingUsers.containsKey(userId)) {
+            System.out.println("사용자 " + userId + "는 이미 대기 중, 매칭 프로세스 재실행");
+            
+            // 이미 대기 중이어도 매칭 프로세스를 다시 실행 (다른 사용자와 매칭 시도)
+            processMatchingSync();
+            
+            return new Object() {
+                public final boolean success = true;
+                public final String message = "매칭 대기 중입니다. 다른 사용자를 찾는 중...";
+                public final String status = "WAITING";
+                public final LocalDateTime waitingSince = waitingUsers.get(userId);
             };
         }
 
@@ -135,12 +142,18 @@ public class MatchingQueueService {
     private boolean findOptimalMatch() {
         System.out.println("🎯 최적 유사도 매칭 알고리즘 실행");
         
-        List<Long> waitingUsersList = new ArrayList<>(waitingUsers.keySet());
+        // 이미 매칭된 사용자들 제외하고 실제 대기 중인 사용자만 필터링
+        List<Long> waitingUsersList = waitingUsers.keySet().stream()
+            .filter(userId -> !matchedUsers.containsKey(userId))
+            .collect(java.util.stream.Collectors.toList());
+            
         double bestCompatibility = 0.0;
         Long bestUser1 = null;
         Long bestUser2 = null;
         
-        System.out.println("대기 사용자 목록: " + waitingUsersList);
+        System.out.println("전체 대기 사용자: " + waitingUsers.keySet());
+        System.out.println("이미 매칭된 사용자: " + matchedUsers.keySet());
+        System.out.println("실제 매칭 가능한 대기 사용자 목록: " + waitingUsersList);
         
         // 모든 사용자 쌍에 대해 유사도 계산
         for (int i = 0; i < waitingUsersList.size(); i++) {
@@ -193,18 +206,22 @@ public class MatchingQueueService {
      */
     private void createSuccessfulMatch(Long user1Id, Long user2Id, double compatibilityScore) {
         try {
-            // 대기 상태에서 제거
+            // 모든 상태에서 완전히 제거 (중복 매칭 방지)
             waitingUsers.remove(user1Id);
             waitingUsers.remove(user2Id);
+            matchingQueue.remove(user1Id);
+            matchingQueue.remove(user2Id);
 
             // 매칭 상태로 변경
             matchedUsers.put(user1Id, user2Id);
             matchedUsers.put(user2Id, user1Id);
             
-            System.out.println("=== 매칭 상태 맵 업데이트 ===");
-            System.out.println("사용자 " + user1Id + " -> " + user2Id + " 매칭 맵에 추가");
-            System.out.println("사용자 " + user2Id + " -> " + user1Id + " 매칭 맵에 추가");
-            System.out.println("현재 matchedUsers 맵: " + matchedUsers);
+            System.out.println("=== 매칭 상태 완전 정리 ===");
+            System.out.println("대기열에서 제거: " + user1Id + ", " + user2Id);
+            System.out.println("매칭 맵에 추가: " + user1Id + " -> " + user2Id + ", " + user2Id + " -> " + user1Id);
+            System.out.println("현재 대기 사용자: " + waitingUsers.keySet());
+            System.out.println("현재 매칭된 사용자: " + matchedUsers.keySet());
+            System.out.println("현재 대기열 크기: " + matchingQueue.size());
 
             // 보안 채팅방 생성 (UUID 기반)
             SecureChatRoomService.ChatRoomCreationResult chatRoomResult = 

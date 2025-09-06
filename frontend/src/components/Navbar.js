@@ -1,53 +1,120 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import {
-    Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star, Shield, Search
+    Home, Users, MessageCircle, BarChart3, Moon, Sun, Music, Heart, Settings, Star, Shield, Search, LogIn, UserPlus, LogOut
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import NotificationCenter from './notifications/NotificationCenter';
 
 const Navbar = ({ darkMode, toggleDarkMode }) => {
     const location = useLocation();
-    const { user } = useUser();
+    const { user, setUser } = useUser();
     const [isAdmin, setIsAdmin] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-    // 관리자 권한 확인 - 로그인 상태도 함께 확인
+    // 로그인 상태 및 관리자 권한 확인
     useEffect(() => {
-        const checkAdminAuth = async () => {
+        const checkAuth = async () => {
             try {
-                // 먼저 로그인 상태 확인
-                const authResponse = await fetch('/api/auth/me', {
+                // OAuth 로그인 확인
+                const oauthResponse = await fetch('/api/auth/me', {
                     credentials: 'include'
                 });
                 
-                if (!authResponse.ok) {
-                    setIsAdmin(false);
-                    return;
+                let authenticated = false;
+                let isOAuthUser = false;
+                let currentUser = null;
+                
+                if (oauthResponse.ok) {
+                    const oauthData = await oauthResponse.json();
+                    if (oauthData.authenticated && oauthData.user) {
+                        authenticated = true;
+                        isOAuthUser = true;
+                        currentUser = oauthData.user;
+                    }
                 }
                 
-                const authData = await authResponse.json();
-                if (!authData.authenticated) {
-                    setIsAdmin(false);
-                    return;
+                // OAuth 로그인이 안되어 있으면 로컬 로그인 확인
+                if (!authenticated) {
+                    const localResponse = await fetch('/api/auth/local/me', {
+                        credentials: 'include'
+                    });
+                    
+                    if (localResponse.ok) {
+                        const localData = await localResponse.json();
+                        if (localData.success && localData.user) {
+                            authenticated = true;
+                            currentUser = localData.user;
+                        }
+                    }
+                }
+                
+                setIsLoggedIn(authenticated);
+                
+                // UserContext 업데이트
+                if (authenticated && currentUser) {
+                    setUser({
+                        id: currentUser.id,
+                        name: currentUser.name,
+                        email: currentUser.email
+                    });
+                } else {
+                    setUser({ id: 1, name: '기본사용자' }); // 기본값으로 초기화
                 }
                 
                 // 로그인되어 있으면 관리자 권한 확인
-                const adminResponse = await fetch('/api/admin/reports/stats', {
-                    credentials: 'include'
-                });
-                
-                if (adminResponse.ok) {
-                    setIsAdmin(true);
+                if (authenticated) {
+                    try {
+                        const adminResponse = await fetch('/api/admin/reports/stats', {
+                            credentials: 'include'
+                        });
+                        setIsAdmin(adminResponse.ok);
+                    } catch (error) {
+                        setIsAdmin(false);
+                    }
                 } else {
                     setIsAdmin(false);
                 }
             } catch (error) {
+                setIsLoggedIn(false);
                 setIsAdmin(false);
             }
         };
         
-        checkAdminAuth();
+        checkAuth();
     }, []);
+
+    // 로그아웃 처리 함수
+    const handleLogout = async () => {
+        try {
+            // OAuth 로그아웃
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            
+            // 로컬 로그아웃
+            await fetch('/api/auth/local/logout', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            
+            // 상태 초기화
+            setIsLoggedIn(false);
+            setIsAdmin(false);
+            setUser({ id: 1, name: '기본사용자' }); // 기본값으로 초기화
+            
+            // 로그인 페이지로 이동
+            window.location.href = '/login';
+        } catch (error) {
+            console.error('로그아웃 중 오류 발생:', error);
+            // 에러가 발생해도 강제로 로그아웃 처리
+            setIsLoggedIn(false);
+            setIsAdmin(false);
+            setUser({ id: 1, name: '기본사용자' });
+            window.location.href = '/login';
+        }
+    };
 
     const navItems = [
         { path: '/dashboard', icon: Home,    label: '홈' },
@@ -103,14 +170,16 @@ const Navbar = ({ darkMode, toggleDarkMode }) => {
 
                     {/* 오른쪽 영역 */}
                     <div className="flex items-center gap-3">
-                        {/* 실시간 연결 상태 뱃지(예시) */}
-                        <span className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full glass-card border-white/20 text-xs text-white/80">
-              <span className="neon-dot" />
-              실시간 연결
-            </span>
+                        {/* 실시간 연결 상태 뱃지(로그인한 경우에만) */}
+                        {isLoggedIn && (
+                            <span className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full glass-card border-white/20 text-xs text-white/80">
+                                <span className="neon-dot" />
+                                실시간 연결
+                            </span>
+                        )}
 
-                        {/* 배지 알림 센터 */}
-                        <NotificationCenter userId={user.id} />
+                        {/* 배지 알림 센터 (로그인한 경우에만) */}
+                        {isLoggedIn && <NotificationCenter userId={user.id} />}
 
                         {/* 다크모드 */}
                         <button
@@ -121,13 +190,46 @@ const Navbar = ({ darkMode, toggleDarkMode }) => {
                             {darkMode ? <Sun className="h-5 w-5 text-white/90" /> : <Moon className="h-5 w-5 text-white/90" />}
                         </button>
 
-                        {/* 사용자 미니 프로필 */}
-                        <div className="hidden sm:flex items-center gap-2 pl-2">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-pink-400 flex items-center justify-center shadow-md">
-                                <Heart className="h-4 w-4 text-white" />
+                        {/* 조건부 렌더링: 로그인/회원가입 버튼 또는 사용자 프로필 */}
+                        {!isLoggedIn ? (
+                            /* 로그인되지 않은 경우: 로그인/회원가입 버튼 */
+                            <div className="flex items-center gap-2">
+                                <Link 
+                                    to="/login"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card border-white/20 text-white/90 hover:bg-white/10 hover:scale-[1.02] transition-all duration-200"
+                                >
+                                    <LogIn className="h-4 w-4" />
+                                    <span className="hidden sm:inline font-medium">로그인</span>
+                                </Link>
+                                <Link 
+                                    to="/signup"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/80 hover:bg-purple-600/90 text-white hover:scale-[1.02] transition-all duration-200 shadow-lg shadow-purple-500/25"
+                                >
+                                    <UserPlus className="h-4 w-4" />
+                                    <span className="hidden sm:inline font-medium">회원가입</span>
+                                </Link>
                             </div>
-                            <span className="text-white/90 font-medium">{user.name}</span>
-                        </div>
+                        ) : (
+                            /* 로그인된 경우: 사용자 미니 프로필 + 로그아웃 버튼 */
+                            <div className="flex items-center gap-2">
+                                <div className="hidden sm:flex items-center gap-2 pl-2">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-400 to-pink-400 flex items-center justify-center shadow-md">
+                                        <Heart className="h-4 w-4 text-white" />
+                                    </div>
+                                    <span className="text-white/90 font-medium">{user.name}</span>
+                                </div>
+                                
+                                {/* 로그아웃 버튼 */}
+                                <button
+                                    onClick={handleLogout}
+                                    className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card border-white/20 text-white/90 hover:bg-red-500/20 hover:border-red-400/40 hover:scale-[1.02] transition-all duration-200"
+                                    title="로그아웃"
+                                >
+                                    <LogOut className="h-4 w-4" />
+                                    <span className="hidden sm:inline font-medium">로그아웃</span>
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
 

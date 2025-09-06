@@ -27,10 +27,28 @@ export const saveProfile = async (
     return data;
 };
 
-// (선택) 현재 로그인 사용자 정보
+// (선택) 현재 로그인 사용자 정보 - OAuth와 로컬 로그인 모두 확인
 export const fetchMe = async () => {
-    const { data } = await api.get('/api/auth/me');
-    return data; // { authenticated: boolean, user?: { id, name, email, ... } }
+    try {
+        // OAuth 로그인 확인
+        const oauthResponse = await api.get('/api/auth/me');
+        if (oauthResponse.data?.authenticated && oauthResponse.data?.user) {
+            return oauthResponse.data;
+        }
+        
+        // OAuth 로그인이 안되어 있으면 로컬 로그인 확인
+        const localResponse = await api.get('/api/auth/local/me');
+        if (localResponse.data?.success && localResponse.data?.user) {
+            return {
+                authenticated: true,
+                user: localResponse.data.user
+            };
+        }
+        
+        return { authenticated: false };
+    } catch (error) {
+        return { authenticated: false };
+    }
 };
 
 // 현재 사용자의 기본 정보 가져오기

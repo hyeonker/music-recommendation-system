@@ -1,6 +1,6 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { Music, Users, Heart, TrendingUp, Play, Clock, Star, Headphones, RefreshCw, AlertCircle } from 'lucide-react';
+import { Music, Users, Heart, Play, Star, Headphones, RefreshCw, AlertCircle } from 'lucide-react';
 import api from '../api/client';
 
 interface Recommendation {
@@ -15,10 +15,9 @@ interface Recommendation {
 }
 
 interface DashboardStats {
-    totalRecommendations: number;
+    recommendationAccuracy: number; // 추천 정확도 (%)
     matchedUsers: number;
     favoriteGenres: string[];
-    listeningTime: number; // minutes
 }
 
 interface RefreshLimits {
@@ -156,8 +155,8 @@ const Dashboard: React.FC = () => {
         if (cached) {
             try {
                 const { data, timestamp }: { data: Recommendation[], timestamp: number } = JSON.parse(cached);
-                // 캐시 유효 시간을 10분으로 단축 (더 자주 새로운 추천)
-                if (Date.now() - timestamp < 10 * 60 * 1000) {
+                // 캐시 유효 시간을 4시간으로 설정 (새로고침 버튼으로만 갱신)
+                if (Date.now() - timestamp < 4 * 60 * 60 * 1000) {
                     setRecommendations(data);
                     return true;
                 }
@@ -184,13 +183,30 @@ const Dashboard: React.FC = () => {
         
         try {
             // 사용자 ID 가져오기
-            let userId = 1;
+            let userId: number | null = null;
+            
+            // OAuth 로그인 확인
             try {
                 const me = await api.get('/api/auth/me');
                 if (me?.data?.authenticated && me?.data?.user?.id) {
                     userId = Number(me.data.user.id);
                 }
             } catch {}
+            
+            // OAuth 로그인이 안되어 있으면 로컬 로그인 확인
+            if (!userId) {
+                try {
+                    const localMe = await api.get('/api/auth/local/me');
+                    if (localMe?.data?.success && localMe?.data?.user?.id) {
+                        userId = Number(localMe.data.user.id);
+                    }
+                } catch {}
+            }
+            
+            // 로그인되지 않은 경우 기본 사용자 사용
+            if (!userId) {
+                userId = 1;
+            }
 
             // 좋아요 목록 로드
             let currentLikedTracks = new Set<string | number>();
@@ -262,20 +278,9 @@ const Dashboard: React.FC = () => {
             const firstBatch = await loadBatch(0, 5);
             allRecs = [...firstBatch];
             
-            if (allRecs.length > 0) {
-                const filteredFirst = allRecs.filter(track => !currentLikedTracks.has(track.id));
-                setRecommendations(prev => isRefresh ? filteredFirst : [...prev, ...filteredFirst]);
-            }
-            
-            // 두 번째 배치 (지연 로딩)
-            setTimeout(async () => {
-                const secondBatch = await loadBatch(5, 5);
-                if (secondBatch.length > 0) {
-                    allRecs = [...allRecs, ...secondBatch];
-                    const filteredSecond = secondBatch.filter(track => !currentLikedTracks.has(track.id));
-                    setRecommendations(prev => [...prev, ...filteredSecond]);
-                }
-            }, 500);
+            // 두 번째 배치 (동기적으로 처리하여 8개 제한 보장)
+            const secondBatch = await loadBatch(5, 5);
+            allRecs = [...allRecs, ...secondBatch];
             
             // 중복 제거 및 필터링 (더미 데이터 사용 안함)
             const filteredRecs = allRecs.filter(track => !currentLikedTracks.has(track.id));
@@ -356,18 +361,34 @@ const Dashboard: React.FC = () => {
         return '🔄 새로고침';
     };
 
+
     const loadDashboardData = useCallback(async () => {
         setLoading(true);
         try {
             // 1) 사용자 ID
-            let userId = 1;
+            let userId: number | null = null;
+            
+            // OAuth 로그인 확인
             try {
                 const me = await api.get('/api/auth/me');
                 if (me?.data?.authenticated && me?.data?.user?.id) {
                     userId = Number(me.data.user.id);
                 }
-            } catch {
-                // ignore → fallback 1
+            } catch {}
+            
+            // OAuth 로그인이 안되어 있으면 로컬 로그인 확인
+            if (!userId) {
+                try {
+                    const localMe = await api.get('/api/auth/local/me');
+                    if (localMe?.data?.success && localMe?.data?.user?.id) {
+                        userId = Number(localMe.data.user.id);
+                    }
+                } catch {}
+            }
+            
+            // 로그인되지 않은 경우 기본 사용자 사용
+            if (!userId) {
+                userId = 1;
             }
 
             // 2) 시스템 상태
@@ -392,28 +413,154 @@ const Dashboard: React.FC = () => {
             // 캐시된 추천 음악 먼저 로드 (즉시 표시)
             const hasCached = loadCachedRecommendations(false);
             
-            // 캐시 여부와 상관없이 서버에서 최신 정보 가져오기 (헤더 정보 때문에)
-            setTimeout(() => loadRecommendationsAsync(false), 100);
+            // 캐시가 없을 때만 서버에서 추천 음악 가져오기
+            if (!hasCached) {
+                setTimeout(() => loadRecommendationsAsync(false), 100);
+            }
 
-            // 5) 통계 계산 (setState 비동기 고려 없이 로컬 sys 사용)
+            // 4) 사용자 통계 데이터 수집
+            let recommendationAccuracy = 0;
+            let userMatchCount = 0; 
+            let userFavoriteGenres: string[] = [];
+            
+            // 추천 정확도 계산 (좋아요한 곡 비율)
+            try {
+                // 좋아요한 총 곡 수
+                const likesResponse = await api.get(`/api/likes/user/${userId}`);
+                const totalLikes = likesResponse.data?.content?.length || likesResponse.data?.length || 0;
+                
+                // 최근 추천받은 곡 수 (최근 7일간)
+                const recResponse = await api.get(`/api/recommendations/user/${userId}?offset=0&limit=50`);
+                const recentRecommendations = Array.isArray(recResponse.data) ? recResponse.data.length : 0;
+                
+                // 고도화된 추천 정확도 계산
+                if (recentRecommendations > 0) {
+                    const recommendations = Array.isArray(recResponse.data) ? recResponse.data : [];
+                    
+                    // 1. 직접 좋아요 기반 정확도 (기존)
+                    const recommendedTrackIds = new Set(recommendations.map((track: any) => String(track.id)));
+                    const likesResponse2 = await api.get(`/api/likes/user/${userId}`);
+                    const userLikes = likesResponse2.data?.content || likesResponse2.data || [];
+                    const likedTrackIds = userLikes.map((like: any) => String(like.externalId || like.songId || like.song?.id)).filter(Boolean);
+                    const directMatches = likedTrackIds.filter((id: string) => recommendedTrackIds.has(id)).length;
+                    
+                    // 2. 아티스트 매칭률 (좋아하는 아티스트의 곡 추천 성공률)
+                    const likedArtists = new Set(userLikes.map((like: any) => like.song?.artist).filter(Boolean));
+                    const artistMatches = recommendations.filter((track: any) => likedArtists.has(track.artist)).length;
+                    
+                    // 3. 고점수 추천 비율 (80점 이상으로 기준 완화)
+                    const highScoreRecommendations = recommendations.filter((track: any) => track.score >= 80).length;
+                    
+                    // 4. 평균 점수 기반 추천 품질
+                    const avgScore = recommendations.reduce((sum: number, track: any) => sum + (track.score || 0), 0) / recommendations.length;
+                    const scoreQuality = Math.min(avgScore, 100); // 평균 점수를 그대로 품질 지표로 사용
+                    
+                    // 5. 장르 기반 매칭 (선호 장르와 일치)
+                    const profileResponse = await api.get(`/api/users/${userId}/profile`);
+                    const userGenres = new Set(
+                        (profileResponse.data?.favoriteGenres || [])
+                            .map((genre: any) => typeof genre === 'string' ? genre : genre.name)
+                            .filter(Boolean)
+                    );
+                    const genreMatches = recommendations.filter((track: any) => 
+                        track.genre && (
+                            userGenres.has(track.genre) || 
+                            track.genre.includes('선호') || 
+                            track.genre.includes('리뷰')
+                        )
+                    ).length;
+                    
+                    // 복합 정확도 계산 (더 관대한 가중 평균)
+                    const directAccuracy = (directMatches / recentRecommendations) * 100;
+                    const artistAccuracy = (artistMatches / recentRecommendations) * 100;
+                    const scoreAccuracy = (highScoreRecommendations / recentRecommendations) * 100;
+                    const genreAccuracy = (genreMatches / recentRecommendations) * 100;
+                    
+                    // 개선된 가중치: 직접 좋아요(20%), 아티스트(30%), 평균점수(25%), 고점수(15%), 장르(10%)
+                    recommendationAccuracy = Math.round(
+                        directAccuracy * 0.2 + 
+                        artistAccuracy * 0.3 + 
+                        scoreQuality * 0.25 +
+                        scoreAccuracy * 0.15 + 
+                        genreAccuracy * 0.1
+                    );
+                    
+                    // 최소 보정: 아무것도 매칭되지 않으면 점수 기반으로라도 계산
+                    if (recommendationAccuracy === 0 && recommendations.length > 0) {
+                        const avgScore = recommendations.reduce((sum: number, track: any) => sum + (track.score || 0), 0) / recommendations.length;
+                        recommendationAccuracy = Math.max(Math.round(avgScore * 0.8), 30); // 평균 점수의 80%로 추정
+                    }
+                } else if (totalLikes > 0) {
+                    // 추천받은 곡이 없지만 좋아요가 있으면 추정치
+                    recommendationAccuracy = Math.min(40 + (totalLikes * 1), 75);
+                } else {
+                    recommendationAccuracy = 0;
+                }
+                
+                console.log(`추천 정확도: ${recommendationAccuracy}% (좋아요: ${totalLikes}곡)`);
+            } catch (error) {
+                console.warn('추천 정확도 계산 실패:', error);
+                recommendationAccuracy = 0;
+            }
+
+            // 사용자 개인별 매칭 통계 (실제 매칭된 총 횟수)
+            try {
+                const matchStatsResponse = await api.get(`/api/matching/stats/user/${userId}`);
+                if (matchStatsResponse.data?.totalMatches !== undefined) {
+                    userMatchCount = matchStatsResponse.data.totalMatches;
+                    console.log('사용자 개인 매칭 횟수:', userMatchCount);
+                } else {
+                    userMatchCount = 0;
+                    console.warn('개인 매칭 통계 데이터가 없습니다');
+                }
+            } catch (error) {
+                console.warn('개인 매칭 통계 조회 실패:', error);
+                // 폴백: 전체 시스템 매칭 통계 사용
+                userMatchCount = sys?.matchingSystem?.statistics?.totalMatched ?? 0;
+            }
+            
+            // 사용자 선호 장르 (프로필에서 가져오기)
+            try {
+                const profileResponse = await api.get(`/api/users/${userId}/profile`);
+                if (profileResponse.data?.favoriteGenres && Array.isArray(profileResponse.data.favoriteGenres)) {
+                    const genreNames = profileResponse.data.favoriteGenres.map((genre: any) => {
+                        if (typeof genre === 'string') {
+                            return genre;
+                        } else if (genre && typeof genre === 'object' && genre.name) {
+                            return genre.name;
+                        }
+                        return '';
+                    }).filter(Boolean);
+                    
+                    // 중복 제거 및 최대 3개까지만 표시
+                    const uniqueGenres = Array.from(new Set<string>(genreNames));
+                    userFavoriteGenres = uniqueGenres.slice(0, 3);
+                }
+            } catch (error) {
+                console.warn('사용자 선호 장르 조회 실패:', error);
+                userFavoriteGenres = [];
+            }
+            
+            // 기본값 설정 (데이터가 없을 때)
+            if (userFavoriteGenres.length === 0) {
+                userFavoriteGenres = ['장르 설정 필요'];
+            }
+
+            // 5) 통계 계산 (실제 데이터 사용)
             const calculated: DashboardStats = {
-                totalRecommendations: 150, // 예: 서버에서 내려주면 대체
-                matchedUsers:
-                    sys?.matchingSystem?.totalMatches ??
-                    matchStatus?.totalMatches ??
-                    23,
-                favoriteGenres: ['K-Pop', 'Pop', 'Rock'],
-                listeningTime: 847,
+                recommendationAccuracy: recommendationAccuracy,
+                matchedUsers: userMatchCount,
+                favoriteGenres: userFavoriteGenres,
             };
             setStats(calculated);
         } catch (e) {
-            // 전체 실패 폴백
+            // 전체 실패 폴백 - 실제 데이터 기반 기본값
+            console.error('Dashboard 데이터 로딩 전체 실패:', e);
             setSystemStatus(null);
             setStats({
-                totalRecommendations: 150,
-                matchedUsers: 23,
-                favoriteGenres: ['K-Pop', 'Pop', 'Rock'],
-                listeningTime: 847,
+                recommendationAccuracy: 0,
+                matchedUsers: 0,
+                favoriteGenres: ['장르 설정 필요'],
             });
             // 전체 실패 시에도 캐시 시도 (더미 데이터 사용 안함)
             if (!loadCachedRecommendations(false)) {
@@ -427,6 +574,7 @@ const Dashboard: React.FC = () => {
     useEffect(() => {
         loadDashboardData();
     }, [loadDashboardData]);
+
     
     
 
@@ -468,14 +616,14 @@ const Dashboard: React.FC = () => {
 
                 {/* 통계 카드 */}
                 {stats && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                         <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-blue-200 text-sm font-medium">총 추천곡</p>
-                                    <p className="text-3xl font-bold text-white">{stats.totalRecommendations}</p>
+                                    <p className="text-blue-200 text-sm font-medium">추천 정확도</p>
+                                    <p className="text-3xl font-bold text-white">{stats.recommendationAccuracy}%</p>
                                 </div>
-                                <Music className="w-12 h-12 text-purple-400" />
+                                <Star className="w-12 h-12 text-yellow-400" />
                             </div>
                         </div>
 
@@ -486,16 +634,6 @@ const Dashboard: React.FC = () => {
                                     <p className="text-3xl font-bold text-white">{stats.matchedUsers}</p>
                                 </div>
                                 <Users className="w-12 h-12 text-blue-400" />
-                            </div>
-                        </div>
-
-                        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-blue-200 text-sm font-medium">청취 시간</p>
-                                    <p className="text-3xl font-bold text-white">{stats.listeningTime}분</p>
-                                </div>
-                                <Clock className="w-12 h-12 text-green-400" />
                             </div>
                         </div>
 
@@ -635,30 +773,6 @@ const Dashboard: React.FC = () => {
                     </div>
                 </div>
 
-                {/* 실시간 활동 */}
-                <div className="mt-8 bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
-                    <h3 className="text-xl font-bold text-white mb-4">실시간 활동</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                        <div>
-                            <p className="text-2xl font-bold text-blue-400">
-                                {systemStatus?.matchingSystem?.queueCount ?? 25}
-                            </p>
-                            <p className="text-gray-400 text-sm">대기 중</p>
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-green-400">
-                                {systemStatus?.matchingSystem?.activeMatches ?? 12}
-                            </p>
-                            <p className="text-gray-400 text-sm">매칭 완료</p>
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-purple-400">
-                                {systemStatus?.chatSystem?.activeChatRooms ?? 87}
-                            </p>
-                            <p className="text-gray-400 text-sm">활성 채팅</p>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     );

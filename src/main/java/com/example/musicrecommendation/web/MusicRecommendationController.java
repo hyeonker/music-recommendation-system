@@ -9,6 +9,8 @@ import com.example.musicrecommendation.service.UserSongLikeService;
 import com.example.musicrecommendation.config.RecommendationProperties;
 import com.example.musicrecommendation.domain.MusicReview;
 import com.example.musicrecommendation.domain.UserSongLike;
+import com.example.musicrecommendation.domain.RecommendationHistory;
+import com.example.musicrecommendation.repository.RecommendationHistoryRepository;
 import com.example.musicrecommendation.web.dto.ProfileDto;
 import com.example.musicrecommendation.web.dto.spotify.TrackDto;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Slf4j
 @RestController
@@ -38,6 +41,7 @@ public class MusicRecommendationController {
     private final RecommendationLimitService limitService;
     private final UserSongLikeService userSongLikeService;
     private final RecommendationProperties properties;
+    private final RecommendationHistoryRepository recommendationHistoryRepository;
     
     // 사용자별 최근 추천 곡 캐시 (중복 방지용) - 3분으로 단축
     private final Map<Long, Set<String>> userRecentRecommendations = new ConcurrentHashMap<>();
@@ -58,12 +62,20 @@ public class MusicRecommendationController {
                 userId, properties.getMaxRecommendationsPerRequest()
             );
             
+            // 추천 히스토리 저장 (별도 스레드에서 비동기 처리)
+            if (!recommendations.isEmpty()) {
+                saveRecommendationHistory(userId, recommendations);
+            }
+            
+            // 총 추천곡 수 조회 (누적 히스토리)
+            long totalRecommendationsCount = recommendationHistoryRepository.countByUserId(userId);
+            
             // 시간당 제한도 확인 (가상의 시간당 제한)
             int hourlyUsed = limitResult.getCurrentCount() > 3 ? 3 : limitResult.getCurrentCount();
             int hourlyMax = 3;
             int hourlyRemaining = Math.max(0, hourlyMax - hourlyUsed);
             
-            // 응답 헤더에 일일 + 시간당 제한 정보 추가
+            // 응답 헤더에 일일 + 시간당 제한 정보 + 총 추천곡 수 추가
             return ResponseEntity.ok()
                 .header("X-Refresh-Used", String.valueOf(limitResult.getCurrentCount()))
                 .header("X-Refresh-Remaining", String.valueOf(limitResult.getRemainingCount()))
@@ -72,6 +84,7 @@ public class MusicRecommendationController {
                 .header("X-Hourly-Used", String.valueOf(hourlyUsed))
                 .header("X-Hourly-Remaining", String.valueOf(hourlyRemaining))
                 .header("X-Hourly-Max", String.valueOf(hourlyMax))
+                .header("X-Total-Count", String.valueOf(totalRecommendationsCount))
                 .body(recommendations);
                 
         } catch (Exception e) {
@@ -152,6 +165,11 @@ public class MusicRecommendationController {
 
                 weightedSources.add(new WeightedRecommendationSource(artist, "ARTIST", "리뷰 기반", 0.9));
             }
+
+
+
+
+
 
 
 
@@ -1191,5 +1209,72 @@ public class MusicRecommendationController {
                 .replaceAll("[^a-zA-Z0-9가-힣\\s]", "")
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    /**
+     * 추천 히스토리를 데이터베이스에 저장
+     */
+    private void saveRecommendationHistory(Long userId, List<Map<String, Object>> recommendations) {
+        try {
+            String sessionId = generateSessionId();
+            LocalDateTime now = LocalDateTime.now();
+            
+            List<RecommendationHistory> historyList = new ArrayList<>();
+            
+            for (Map<String, Object> rec : recommendations) {
+                // 중복 체크: 최근 1시간 내에 같은 트랙이 추천되었는지 확인
+                String trackId = (String) rec.get("id");
+                String trackTitle = (String) rec.get("title");
+                String trackArtist = (String) rec.get("artist");
+                
+                if (trackTitle != null && trackArtist != null) {
+                    boolean alreadyRecommended = recommendationHistoryRepository
+                        .existsByUserIdAndTrackTitleAndTrackArtistAndCreatedAtAfter(
+                            userId, trackTitle, trackArtist, now.minusHours(1)
+                        );
+                    
+                    if (!alreadyRecommended) {
+                        RecommendationHistory history = RecommendationHistory.builder()
+                            .userId(userId)
+                            .trackId(trackId)
+                            .trackTitle(trackTitle)
+                            .trackArtist(trackArtist)
+                            .trackGenre((String) rec.get("genre"))
+                            .recommendationType((String) rec.get("genre"))
+                            .recommendationScore((Integer) rec.get("score"))
+                            .spotifyId((String) rec.get("spotifyId"))
+                            .sessionId(sessionId)
+                            .createdAt(now)
+                            .build();
+                        
+                        historyList.add(history);
+                    } else {
+                        log.debug("중복 추천 스킵: {} - {}", trackTitle, trackArtist);
+                    }
+                }
+            }
+            
+            if (!historyList.isEmpty()) {
+                // 배치로 저장 (성능 최적화)
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        recommendationHistoryRepository.saveAll(historyList);
+                        log.info("사용자 {} 추천 히스토리 {}개 저장 완료 (세션: {})", userId, historyList.size(), sessionId);
+                    } catch (Exception e) {
+                        log.error("추천 히스토리 저장 실패 - userId: {}, error: {}", userId, e.getMessage(), e);
+                    }
+                });
+            }
+            
+        } catch (Exception e) {
+            log.error("추천 히스토리 저장 중 오류: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * 세션 ID 생성 (같은 시점에 생성된 추천들을 그룹화)
+     */
+    private String generateSessionId() {
+        return "session_" + System.currentTimeMillis() + "_" + (int)(Math.random() * 1000);
     }
 }

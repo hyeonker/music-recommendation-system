@@ -25,6 +25,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     useEffect(() => {
         const fetchCurrentUser = async () => {
             try {
+                // OAuth 인증 확인
                 const response = await fetch('/api/auth/me');
                 const data = await response.json();
                 if (data?.authenticated && data?.user?.id) {
@@ -32,10 +33,27 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     const userName = data.user.name || `사용자${userId}`;
                     setCurrentUserId(userId);
                     setCurrentUserName(userName);
-                    console.log('SocketContext: 현재 사용자 설정됨', { userId, userName });
+                    console.log('SocketContext: OAuth 사용자 설정됨', { userId, userName });
+                } else {
+                    // 로컬 인증 확인
+                    try {
+                        const localResponse = await fetch('/api/auth/local/me');
+                        const localData = await localResponse.json();
+                        if (localData?.success && localData?.user?.id) {
+                            const userId = Number(localData.user.id);
+                            const userName = localData.user.username || `사용자${userId}`;
+                            setCurrentUserId(userId);
+                            setCurrentUserName(userName);
+                            console.log('SocketContext: 로컬 사용자 설정됨', { userId, userName });
+                        } else {
+                            console.log('SocketContext: 인증된 사용자 없음, 기본값 유지');
+                        }
+                    } catch (localError) {
+                        console.error('SocketContext: 로컬 인증 확인 실패', localError);
+                    }
                 }
             } catch (error) {
-                console.error('SocketContext: 사용자 정보 가져오기 실패', error);
+                console.error('SocketContext: OAuth 인증 확인 실패', error);
                 // 기본값 유지
             }
         };
@@ -44,19 +62,45 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, []);
 
     useEffect(() => {
-        // WebSocket 매니저 생성 및 설정
-        const manager = new WebSocketManager();
+        // 중복 연결 방지
+        if (wsManager) {
+            console.log('🔄 SocketContext: WebSocket 이미 연결됨, 중복 방지');
+            return;
+        }
+
+        // 사용자 ID가 설정될 때까지 대기
+        if (currentUserId === 1) {
+            console.log('⏳ SocketContext: 사용자 ID 설정 대기 중...');
+            return;
+        }
+
+        console.log(`🔌 SocketContext: 새로운 WebSocket 연결 생성 (userId: ${currentUserId})`);
+        
+        // WebSocket 매니저 생성 및 설정 - 실제 사용자 ID 전달
+        const manager = new WebSocketManager(currentUserId.toString());
+        let isConnected = false; // 중복 연결 상태 추적
 
         // 연결 이벤트 핸들러
         manager.onConnect(() => {
+            if (isConnected) {
+                console.log('🔄 SocketContext: 이미 연결된 상태, 중복 메시지 방지');
+                return;
+            }
+            
+            isConnected = true;
             console.log('🎉 SocketContext: WebSocket 연결 완료');
             setIsConnected(true);
             setConnectionStatus('connected');
-            toast.success('실시간 연결이 활성화되었습니다');
+            // 중복 메시지 방지를 위해 한 번만 표시
+            toast.success('🔗 실시간 연결 활성화', { 
+                duration: 2000,
+                id: 'socket-connected' // 중복 방지 ID
+            });
         });
 
         // 연결 해제 이벤트 핸들러
         manager.onDisconnect(() => {
+            isConnected = false;
             console.log('WebSocket Context: 연결 해제됨');
             setIsConnected(false);
             setConnectionStatus('disconnected');
@@ -69,21 +113,36 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setConnectionStatus('disconnected');
         });
 
-        // 일반 메시지 핸들러
+        // 일반 메시지 핸들러 (중복 방지 추가)
+        let lastMatchingMessage = '';
         manager.onMessage((message: WebSocketMessage) => {
             console.log('🔥 SocketContext: WebSocket 메시지 수신:', message);
 
             switch (message.type) {
                 case 'MATCHING_SUCCESS':
+                    const messageKey = `${message.data?.roomId || 'unknown'}_${Date.now()}`;
+                    if (lastMatchingMessage === messageKey) {
+                        console.log('🔄 SocketContext: 중복 매칭 성공 메시지 방지');
+                        return;
+                    }
+                    lastMatchingMessage = messageKey;
+                    
                     console.log('🎉 SocketContext: 매칭 성공 메시지 처리중, 데이터:', message.data);
-                    toast.success('매칭 성공! 새로운 음악 친구를 찾았습니다');
+                    
+                    // 단일 매칭 성공 토스트 표시
+                    const matchedUserName = message.data?.matchedUser?.name || '음악친구';
+                    toast.success(`🎉 매칭 성공! ${matchedUserName}님과 연결되었습니다`, {
+                        duration: 4000,
+                        id: `matching-success-${message.data?.roomId}` // 중복 방지 ID
+                    });
+                    
                     // 매칭 성공 이벤트 발생
                     console.log('📢 SocketContext: matchingSuccess 커스텀 이벤트 발생');
                     window.dispatchEvent(new CustomEvent('matchingSuccess', { detail: message.data }));
                     break;
 
                 case 'MATCHING_FAILED':
-                    toast.error('매칭에 실패했습니다. 다시 시도해주세요');
+                    console.log('❌ SocketContext: 매칭 실패');
                     window.dispatchEvent(new CustomEvent('matchingFailed', { detail: message.data }));
                     break;
 
@@ -116,7 +175,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return () => {
             manager.disconnect();
         };
-    }, []);
+    }, [currentUserId]); // currentUserId 의존성 추가
 
     // 연결 상태 업데이트
     useEffect(() => {

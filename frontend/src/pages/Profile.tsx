@@ -95,9 +95,9 @@ const toArtistArray = (data: any): Artist[] => {
 };
 
 const Profile: React.FC = () => {
-    // ⭐ 로그인 사용자 ID 별도 관리
-    const [userId, setUserId] = useState<number>(1);
-    const [profile, setProfile] = useState<UserProfile>(normalizeProfile(null, userId));
+    // ⭐ 로그인 사용자 ID 별도 관리 - null로 초기화
+    const [userId, setUserId] = useState<number | null>(null);
+    const [profile, setProfile] = useState<UserProfile | null>(null);
     const { setUser } = useUser();
 
     // 검색/저장/로딩 상태
@@ -285,30 +285,39 @@ const Profile: React.FC = () => {
     };
 
     const addArtist = (artist: Artist) => {
+        if (!userId || !profile) return;
+        
         const current = profile.favoriteArtists ?? [];
         if (current.find((a) => a.id === artist.id)) {
             toast.error('이미 추가된 아티스트입니다');
             return;
         }
-        setProfile((prev) =>
-            normalizeProfile({ ...prev, favoriteArtists: [...(prev.favoriteArtists ?? []), artist] }, userId)
-        );
+        setProfile((prev) => {
+            if (!prev) return null;
+            return normalizeProfile({ ...prev, favoriteArtists: [...(prev.favoriteArtists ?? []), artist] }, userId);
+        });
         setArtistSearchQuery('');
         setSearchResults([]);
         toast.success(`${artist.name}이(가) 추가되었습니다`);
     };
 
     const removeArtist = (artistId: string) => {
-        setProfile((prev) =>
-            normalizeProfile(
+        if (!userId || !profile) return;
+        
+        setProfile((prev) => {
+            if (!prev) return null;
+            return normalizeProfile(
                 { ...prev, favoriteArtists: (prev.favoriteArtists ?? []).filter((a) => a.id !== artistId) },
                 userId
-            )
-        );
+            );
+        });
     };
 
     const toggleGenre = (genre: Genre) => {
+        if (!userId || !profile) return;
+        
         setProfile((prev) => {
+            if (!prev) return null;
             const list = prev.favoriteGenres ?? [];
             const exists = list.find((g) => g.id === genre.id);
             return normalizeProfile(
@@ -319,7 +328,10 @@ const Profile: React.FC = () => {
     };
 
     const toggleFestival = (festivalId: string) => {
+        if (!userId || !profile) return;
+        
         setProfile((prev) => {
+            if (!prev) return null;
             const list = prev.attendedFestivals ?? [];
             const exists = list.includes(festivalId);
             return normalizeProfile(
@@ -330,7 +342,10 @@ const Profile: React.FC = () => {
     };
 
     const toggleMood = (mood: string) => {
+        if (!userId || !profile) return;
+        
         setProfile((prev) => {
+            if (!prev) return null;
             const mp =
                 prev.musicPreferences ?? {
                     preferredEra: '',
@@ -490,6 +505,11 @@ const Profile: React.FC = () => {
     };
 
     const onSaveProfile = async () => {
+        if (!userId || !profile) {
+            toast.error('프로필 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+            return;
+        }
+        
         // 운영자가 아닌 경우에만 이름 중복 체크
         if (!isAdmin && nameError) {
             toast.error('닉네임 중복을 해결해주세요');
@@ -521,7 +541,7 @@ const Profile: React.FC = () => {
             }
             
             // saved는 ServerProfile 타입이므로 as any로 합치고 normalize로 보정
-            setProfile((prev) => normalizeProfile({ ...prev, ...(saved as any) }, userId));
+            setProfile((prev) => prev ? normalizeProfile({ ...prev, ...(saved as any) }, userId) : null);
             toast.success('프로필이 저장되었습니다!');
         } catch (e: any) {
             console.error('프로필 저장 실패:', e);
@@ -559,7 +579,9 @@ const Profile: React.FC = () => {
                     setIsAdmin(false);
                 }
             } catch {
-                setUserId(1);
+                // 로그인되지 않은 경우 기본값으로 설정하지 말고 null 유지
+                console.warn('사용자 인증 정보를 가져올 수 없습니다.');
+                setUserId(1); // 기본 사용자 ID로 폴백
                 setIsAdmin(false);
             }
         })();
@@ -618,12 +640,12 @@ const Profile: React.FC = () => {
     // 이름 중복 체크 디바운스
     useEffect(() => {
         const t = setTimeout(() => {
-            if (profile.name && profile.name.trim().length > 0) {
+            if (profile?.name && profile.name.trim().length > 0) {
                 checkNameExists(profile.name.trim());
             }
         }, 500);
         return () => clearTimeout(t);
-    }, [profile.name]);
+    }, [profile?.name]);
 
     // ESC로 드롭다운/검색 취소
     useEffect(() => {
@@ -653,11 +675,11 @@ const Profile: React.FC = () => {
     useEffect(() => () => abortRef.current?.abort(), []);
 
     // --- UI 바인딩 ---
-    const favArtists = profile.favoriteArtists ?? [];
-    const favGenres = profile.favoriteGenres ?? [];
-    const attended = profile.attendedFestivals ?? [];
+    const favArtists = profile?.favoriteArtists ?? [];
+    const favGenres = profile?.favoriteGenres ?? [];
+    const attended = profile?.attendedFestivals ?? [];
     const mp =
-        profile.musicPreferences ?? {
+        profile?.musicPreferences ?? {
             preferredEra: '',
             moodPreferences: [],
             listeningFrequency: '',
@@ -668,8 +690,8 @@ const Profile: React.FC = () => {
     const results = Array.isArray(searchResults) ? searchResults : [];
     const shouldShowDropdown = !!artistSearchQuery.trim() && (isSearching || results.length > 0);
 
-    // 로딩 화면
-    if (isLoading) {
+    // 로딩 화면 - userId나 profile이 설정될 때까지 기다림
+    if (isLoading || !userId || !profile) {
         return (
             <div className="min-h-[50vh] grid place-items-center">
                 <div className="loading-spinner" />
@@ -708,7 +730,8 @@ const Profile: React.FC = () => {
                                         }
                                         
                                         const newName = validation.sanitized;
-                                        setProfile((prev) => normalizeProfile({ ...prev, name: newName }, userId));
+                                        if (!userId) return;
+                                        setProfile((prev) => prev ? normalizeProfile({ ...prev, name: newName }, userId) : null);
                                         
                                         // 빈 값일 때만 즉시 에러 초기화
                                         if (newName.trim().length === 0) {
@@ -972,16 +995,18 @@ const Profile: React.FC = () => {
                             {eraOptions.map((era) => (
                                 <button
                                     key={era.value}
-                                    onClick={() =>
-                                        setProfile((prev) =>
-                                            normalizeProfile(
+                                    onClick={() => {
+                                        if (!userId || !profile) return;
+                                        setProfile((prev) => {
+                                            if (!prev) return null;
+                                            return normalizeProfile(
                                                 { ...prev, musicPreferences: { ...(prev.musicPreferences), preferredEra: era.value } },
                                                 userId
-                                            )
-                                        )
-                                    }
+                                            );
+                                        });
+                                    }}
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        profile.musicPreferences.preferredEra === era.value
+                                        profile?.musicPreferences.preferredEra === era.value
                                             ? 'bg-green-600 text-white border-2 border-green-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -999,19 +1024,21 @@ const Profile: React.FC = () => {
                             {listeningFrequencyOptions.map((freq) => (
                                 <button
                                     key={freq.value}
-                                    onClick={() =>
-                                        setProfile((prev) =>
-                                            normalizeProfile(
+                                    onClick={() => {
+                                        if (!userId || !profile) return;
+                                        setProfile((prev) => {
+                                            if (!prev) return null;
+                                            return normalizeProfile(
                                                 {
                                                     ...prev,
                                                     musicPreferences: { ...(prev.musicPreferences), listeningFrequency: freq.value },
                                                 },
                                                 userId
-                                            )
-                                        )
-                                    }
+                                            );
+                                        });
+                                    }}
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        profile.musicPreferences.listeningFrequency === freq.value
+                                        profile?.musicPreferences.listeningFrequency === freq.value
                                             ? 'bg-yellow-600 text-white border-2 border-yellow-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -1029,19 +1056,21 @@ const Profile: React.FC = () => {
                             {concertFrequencyOptions.map((freq) => (
                                 <button
                                     key={freq.value}
-                                    onClick={() =>
-                                        setProfile((prev) =>
-                                            normalizeProfile(
+                                    onClick={() => {
+                                        if (!userId || !profile) return;
+                                        setProfile((prev) => {
+                                            if (!prev) return null;
+                                            return normalizeProfile(
                                                 {
                                                     ...prev,
                                                     musicPreferences: { ...(prev.musicPreferences), concertFrequency: freq.value },
                                                 },
                                                 userId
-                                            )
-                                        )
-                                    }
+                                            );
+                                        });
+                                    }}
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        profile.musicPreferences.concertFrequency === freq.value
+                                        profile?.musicPreferences.concertFrequency === freq.value
                                             ? 'bg-red-600 text-white border-2 border-red-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -1059,16 +1088,18 @@ const Profile: React.FC = () => {
                             {discoveryMethodOptions.map((method) => (
                                 <button
                                     key={method.value}
-                                    onClick={() =>
-                                        setProfile((prev) =>
-                                            normalizeProfile(
+                                    onClick={() => {
+                                        if (!userId || !profile) return;
+                                        setProfile((prev) => {
+                                            if (!prev) return null;
+                                            return normalizeProfile(
                                                 { ...prev, musicPreferences: { ...(prev.musicPreferences), discoveryMethod: method.value } },
                                                 userId
-                                            )
-                                        )
-                                    }
+                                            );
+                                        });
+                                    }}
                                     className={`p-3 rounded-lg text-sm font-medium transition-all ${
-                                        profile.musicPreferences.discoveryMethod === method.value
+                                        profile?.musicPreferences.discoveryMethod === method.value
                                             ? 'bg-indigo-600 text-white border-2 border-indigo-400'
                                             : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
                                     }`}
@@ -1082,11 +1113,11 @@ const Profile: React.FC = () => {
                     {/* 선호 무드 (다중 선택) */}
                     <div className="mb-6">
                         <label className="block text-blue-200 text-sm mb-3">
-                            선호하는 음악 무드 ({profile.musicPreferences.moodPreferences.length})
+                            선호하는 음악 무드 ({profile?.musicPreferences.moodPreferences.length ?? 0})
                         </label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                             {moodOptions.map((mood) => {
-                                const isSelected = profile.musicPreferences.moodPreferences.includes(mood.value);
+                                const isSelected = profile?.musicPreferences.moodPreferences.includes(mood.value) ?? false;
                                 return (
                                     <button
                                         key={mood.value}
@@ -1217,11 +1248,11 @@ const Profile: React.FC = () => {
                             <div className="text-white text-sm">
                                 청취:{' '}
                                 {listeningFrequencyOptions.find(
-                                    (f) => f.value === profile.musicPreferences.listeningFrequency
+                                    (f) => f.value === profile?.musicPreferences.listeningFrequency
                                 )?.label || '미설정'}{' '}
                                 | 공연:{' '}
                                 {concertFrequencyOptions.find(
-                                    (f) => f.value === profile.musicPreferences.concertFrequency
+                                    (f) => f.value === profile?.musicPreferences.concertFrequency
                                 )?.label || '미설정'}
                             </div>
                         </div>

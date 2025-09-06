@@ -19,7 +19,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     public void onAuthenticationSuccess(HttpServletRequest request,
                                         HttpServletResponse response,
                                         Authentication authentication) throws IOException {
-        // 로그인 성공 후 프론트 홈으로 리다이렉트
-        response.sendRedirect(frontendOrigin + "/");
+        // 로그인 성공 후 프론트 대시보드로 리다이렉트
+        response.sendRedirect(frontendOrigin + "/dashboard");
     }
 }

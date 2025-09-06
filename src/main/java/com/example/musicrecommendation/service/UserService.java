@@ -4,6 +4,7 @@ import com.example.musicrecommendation.domain.AuthProvider;
 import com.example.musicrecommendation.domain.User;
 import com.example.musicrecommendation.domain.UserRepository;
 import com.example.musicrecommendation.util.SecurityUtils;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,9 +19,11 @@ import java.util.Optional;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     /**
@@ -90,6 +93,91 @@ public class UserService {
 
         User newUser = new User(email, name, profileImageUrl, provider, providerId);
         return userRepository.save(newUser);
+    }
+
+    /**
+     * 아이디/비밀번호 기반 회원가입
+     *
+     * @param email 이메일 (아이디 역할)
+     * @param name 실명
+     * @param password 평문 비밀번호
+     * @return 생성된 사용자
+     */
+    @Transactional
+    public User createUserWithPassword(String email, String name, String password) {
+        // 이메일 중복 체크
+        if (userRepository.existsByEmail(email)) {
+            throw new IllegalArgumentException("이미 가입된 이메일입니다: " + email);
+        }
+
+        // 비밀번호 유효성 검사
+        validatePassword(password);
+
+        // 이름 유효성 검사
+        validateName(name, null);
+
+        // 비밀번호 암호화
+        String encodedPassword = passwordEncoder.encode(password);
+
+        User newUser = new User(email, name.trim(), encodedPassword);
+        return userRepository.save(newUser);
+    }
+
+    /**
+     * 로그인 검증
+     *
+     * @param email 이메일
+     * @param password 평문 비밀번호
+     * @return 인증 성공 시 사용자 정보, 실패 시 empty
+     */
+    public Optional<User> authenticateUser(String email, String password) {
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        
+        if (userOpt.isPresent()) {
+            User user = userOpt.get();
+            
+            // LOCAL 로그인 사용자만 비밀번호 인증
+            if (user.getProvider() == AuthProvider.LOCAL && 
+                user.getPasswordHash() != null &&
+                passwordEncoder.matches(password, user.getPasswordHash())) {
+                
+                // 계정 상태 확인
+                if (!user.isActive()) {
+                    throw new IllegalArgumentException("비활성화된 계정입니다.");
+                }
+                
+                return Optional.of(user);
+            }
+        }
+        
+        return Optional.empty();
+    }
+
+    /**
+     * 비밀번호 유효성 검사
+     */
+    private void validatePassword(String password) {
+        if (password == null || password.trim().isEmpty()) {
+            throw new IllegalArgumentException("비밀번호를 입력해주세요.");
+        }
+
+        String trimmedPassword = password.trim();
+
+        if (trimmedPassword.length() < 6) {
+            throw new IllegalArgumentException("비밀번호는 최소 6자 이상이어야 합니다.");
+        }
+
+        if (trimmedPassword.length() > 100) {
+            throw new IllegalArgumentException("비밀번호는 최대 100자까지 가능합니다.");
+        }
+
+        // 보안 강화: 간단한 패턴 체크
+        boolean hasLetter = trimmedPassword.matches(".*[a-zA-Z].*");
+        boolean hasDigit = trimmedPassword.matches(".*\\d.*");
+        
+        if (!hasLetter || !hasDigit) {
+            throw new IllegalArgumentException("비밀번호는 영문자와 숫자를 모두 포함해야 합니다.");
+        }
     }
 
     /**

@@ -46,10 +46,16 @@ public class User {
     private AuthProvider provider;
 
     /**
-     * OAuth2 제공자에서의 사용자 고유 ID
+     * OAuth2 제공자에서의 사용자 고유 ID (아이디/비밀번호 로그인 시에는 null)
      */
-    @Column(name = "provider_id", nullable = false)
+    @Column(name = "provider_id")
     private String providerId;
+
+    /**
+     * 암호화된 비밀번호 (아이디/비밀번호 로그인 시에만 사용)
+     */
+    @Column(name = "password_hash")
+    private String passwordHash;
 
     /**
      * 계정 생성일시 (자동 설정)
@@ -101,6 +107,21 @@ public class User {
         this.providerId = providerId;
     }
 
+    /**
+     * 아이디/비밀번호 로그인용 생성자
+     *
+     * @param email 이메일 (아이디 역할)
+     * @param name 실명
+     * @param passwordHash 암호화된 비밀번호
+     */
+    public User(String email, String name, String passwordHash) {
+        this.email = email;
+        this.name = name;
+        this.passwordHash = passwordHash;
+        this.provider = AuthProvider.LOCAL;
+        this.providerId = null;
+    }
+
     // === Getters ===
     public Long getId() {
         return id;
@@ -124,6 +145,10 @@ public class User {
 
     public String getProviderId() {
         return providerId;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
     }
 
     public LocalDateTime getCreatedAt() {

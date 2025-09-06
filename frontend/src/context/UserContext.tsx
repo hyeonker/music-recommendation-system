@@ -4,6 +4,7 @@ import { createContext, useContext } from 'react';
 interface User {
     id: number;
     name: string;
+    email?: string;
 }
 
 // User Context 타입 정의
