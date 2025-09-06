@@ -288,28 +288,49 @@ public class UserSongLikeController {
             description = "Spotify 등 외부 서비스의 음악 좋아요를 취소합니다.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "좋아요 취소 성공"),
-            @ApiResponse(responseCode = "404", description = "좋아요를 찾을 수 없음")
+            @ApiResponse(responseCode = "404", description = "좋아요를 찾을 수 없음"),
+            @ApiResponse(responseCode = "401", description = "인증되지 않은 사용자")
     })
     public ResponseEntity<LikeToggleResponse> unlikeExternalSong(
-            @PathVariable String songId) {
+            @PathVariable String songId,
+            @RequestParam String title,
+            @RequestParam String artist,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
 
         try {
-            // TODO: 실제 인증된 사용자 ID 사용
-            throw new IllegalStateException("사용자 인증이 구현되지 않았습니다");
+            log.debug("외부 음악 좋아요 취소 요청 받음: songId={}, title={}, artist={}", songId, title, artist);
             
-            /*
-            boolean liked = userSongLikeService.unlikeExternalSong(userId, songId);
-            
-            // songId를 Long으로 파싱 (Spotify ID를 해시코드로 변환)
-            Long songIdAsLong = (long) songId.hashCode();
-            long totalLikes = userSongLikeService.getSongLikeCount(songIdAsLong);
+            if (oauth2User == null) {
+                log.warn("인증되지 않은 사용자의 좋아요 취소 요청");
+                return ResponseEntity.status(401).build(); // Unauthorized
+            }
 
-            LikeToggleResponse response = new LikeToggleResponse(userId, songIdAsLong, liked, totalLikes);
+            Long userId = getCurrentUserId(oauth2User);
+            log.debug("인증된 사용자 ID: {}", userId);
+            
+            // title과 artist를 사용하여 곡 찾기 (좋아요할 때와 동일한 방식)
+            boolean unliked = userSongLikeService.unlikeExternalSongByTitleArtist(userId, title, artist);
+            
+            if (!unliked) {
+                // 좋아요 상태가 아니었거나 곡을 찾을 수 없는 경우
+                log.debug("좋아요 취소 실패: userId={}, title={}, artist={}", userId, title, artist);
+                return ResponseEntity.notFound().build();
+            }
+            
+            // 응답을 위해 해시 ID 사용 (일관성을 위해)
+            Long hashSongId = (long) Math.abs(songId.hashCode());
+            long totalLikes = 0; // 좋아요 취소 후이므로 정확한 개수를 다시 계산하지 않음
+
+            LikeToggleResponse response = new LikeToggleResponse(userId, hashSongId, false, totalLikes);
+            log.debug("좋아요 취소 완료: userId={}, hashSongId={}", userId, hashSongId);
             return ResponseEntity.ok(response);
-            */
 
+        } catch (IllegalArgumentException e) {
+            log.error("좋아요 취소 중 잘못된 인수: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
         } catch (Exception e) {
-            return ResponseEntity.notFound().build();
+            log.error("외부 음악 좋아요 취소 처리 중 오류 발생", e);
+            return ResponseEntity.status(500).build();
         }
     }
 

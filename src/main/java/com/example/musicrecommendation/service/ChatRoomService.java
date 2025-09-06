@@ -15,6 +15,7 @@ public class ChatRoomService {
 
     private final SimpMessagingTemplate messagingTemplate;
     private final ChatMessageService chatMessageService; // 암호화 저장
+    private final MusicSharingHistoryService musicSharingHistoryService; // 음악 공유 히스토리
 
     // In-memory 저장 (실시간 브로드캐스트/데모용)
     private final Map<String, Object> chatRooms = new ConcurrentHashMap<>();
@@ -24,19 +25,69 @@ public class ChatRoomService {
     /** 문자열 roomId에서 "마지막 숫자"를 DB roomId로 사용 (예: room_1_22 -> 22, "22" -> 22) */
     private long toDbRoomId(String roomId) {
         if (roomId == null) return 0L;
+        
+        System.out.println("[ChatRoomService] toDbRoomId 호출: roomId=" + roomId);
+        
         try {
-            return Long.parseLong(roomId); // 숫자만인 경우
+            long result = Long.parseLong(roomId); // 숫자만인 경우
+            System.out.println("[ChatRoomService] toDbRoomId 결과 (순수 숫자): " + result);
+            return result;
         } catch (Exception ignore) { /* fall through */ }
-        var p = java.util.regex.Pattern.compile("(\\d+)(?!.*\\d)");
-        var m = p.matcher(roomId);
-        if (m.find()) {
-            try {
-                return Long.parseLong(m.group(1));
-            } catch (NumberFormatException e) {
-                return 0L;
+        
+        // roomId에서 해시 값 생성 (모든 사용자가 동일한 DB room_id 사용하도록)
+        long hash = Math.abs(roomId.hashCode()) % 1000000000L; // 10억 미만으로 제한
+        System.out.println("[ChatRoomService] toDbRoomId 결과 (해시): " + hash + " (원본: " + roomId + ")");
+        return hash;
+    }
+
+    /** 채팅방에서 상대방 사용자 ID 찾기 */
+    private Long findReceiverInRoom(String roomId, Long senderId) {
+        System.out.println("[ChatRoomService] findReceiverInRoom 호출: roomId=" + roomId + ", senderId=" + senderId);
+        
+        // roomId 패턴: "room_1_22" -> user1Id=1, user2Id=22
+        if (roomId != null && roomId.startsWith("room_")) {
+            String[] parts = roomId.split("_");
+            if (parts.length == 3) {
+                try {
+                    Long user1Id = Long.parseLong(parts[1]);
+                    Long user2Id = Long.parseLong(parts[2]);
+                    
+                    // 보낸 사람이 아닌 다른 사용자 반환
+                    if (senderId.equals(user1Id)) {
+                        return user2Id;
+                    } else if (senderId.equals(user2Id)) {
+                        return user1Id;
+                    }
+                } catch (NumberFormatException e) {
+                    System.err.println("[ChatRoomService] Invalid roomId format: " + roomId);
+                }
+            } else {
+                System.out.println("[ChatRoomService] roomId 형식 오류: 파트 개수=" + parts.length + ", 예상=3");
             }
+        } else {
+            System.out.println("[ChatRoomService] roomId 형식 오류: room_ 프리픽스 없음 또는 null");
         }
-        return 0L;
+        return null;
+    }
+
+    /** DB room_id에서 다른 참여자 찾기 */
+    private Long findReceiverByDbRoomId(String roomId, Long senderId) {
+        try {
+            long dbRoomId = toDbRoomId(roomId);
+            if (dbRoomId <= 0) {
+                System.out.println("[ChatRoomService] 유효하지 않은 DB room ID: " + dbRoomId);
+                return null;
+            }
+            
+            // 해당 채팅방에서 senderId가 아닌 다른 사용자 찾기
+            Long receiverId = chatMessageService.findOtherParticipant(dbRoomId, senderId);
+            System.out.println("[ChatRoomService] DB에서 찾은 다른 참여자: " + receiverId);
+            return receiverId;
+            
+        } catch (Exception e) {
+            System.err.println("[ChatRoomService] findReceiverByDbRoomId 실패: " + e.getMessage());
+            return null;
+        }
     }
 
     /** 채팅방 생성 (매칭 성공 시 호출) */
@@ -112,6 +163,7 @@ public class ChatRoomService {
 
     /** 음악 공유 메시지(라인 문자열) 저장 + 브로드캐스트 */
     public Object shareMusicTrack(String roomId, Long senderId, String trackName, String artist, String spotifyUrl) {
+        // 1. 채팅 메시지로 저장 (기존 기능)
         try {
             long dbRoomId = toDbRoomId(roomId);
             if (dbRoomId > 0) {
@@ -122,6 +174,35 @@ public class ChatRoomService {
             }
         } catch (Exception e) {
             System.err.println("[ChatRoomService] saveText (music) failed: " + e.getMessage());
+        }
+
+        // 2. 음악 공유 히스토리에 저장 (새 기능)
+        try {
+            System.out.println("[ChatRoomService] 음악 공유 히스토리 저장 시작: roomId=" + roomId + ", senderId=" + senderId);
+            
+            // DB room_id에서 다른 참여자 찾기
+            Long receiverUserId = findReceiverByDbRoomId(roomId, senderId);
+            System.out.println("[ChatRoomService] DB에서 찾은 수신자: receiverUserId=" + receiverUserId);
+            
+            if (receiverUserId != null) {
+                // 공유한 사용자의 이름 추출 (실제 구현에서는 UserService에서 가져와야 함)
+                String senderName = "음악친구"; // 기본값
+                
+                // 음악 공유 히스토리 저장
+                musicSharingHistoryService.saveMusicShare(
+                    receiverUserId, senderId, senderName,
+                    trackName != null ? trackName : "Unknown Track",
+                    artist != null ? artist : "Unknown Artist",
+                    spotifyUrl, roomId, null // matchingSessionId는 나중에 추가 가능
+                );
+                
+                System.out.println("[ChatRoomService] Music sharing history saved: " + 
+                    trackName + " by " + artist + " from user " + senderId + " to user " + receiverUserId);
+            } else {
+                System.out.println("[ChatRoomService] 수신자를 찾을 수 없어서 음악 히스토리 저장 생략");
+            }
+        } catch (Exception e) {
+            System.err.println("[ChatRoomService] Music sharing history save failed: " + e.getMessage());
         }
 
         Object musicMessage = new Object() {

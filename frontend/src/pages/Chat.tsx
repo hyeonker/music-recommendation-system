@@ -351,14 +351,83 @@ const Chat: React.FC = () => {
         }
     };
 
-    /* -------- 메시지 로드 -------- */
+    /* -------- 메시지 캐싱 키 -------- */
+    const getMessageCacheKey = (roomId: string | number): string => {
+        return `chatMessages_${roomId}`;
+    };
+
+    // 사용자 쌍 기반 캐시 키 (로그아웃/재로그인에 안전)
+    const getUserPairCacheKey = (userId1: number, userId2: number): string => {
+        const sortedIds = [userId1, userId2].sort((a, b) => a - b);
+        return `chatHistory_${sortedIds[0]}_${sortedIds[1]}`;
+    };
+
+    // 메시지 캐시 업데이트 헬퍼 함수 (roomId + 사용자 쌍 캐시 동시 업데이트)
+    const updateMessageCache = (messages: ChatMessage[], roomId: string | number) => {
+        try {
+            // 1. 룸ID 기반 캐시 업데이트
+            const cacheKey = getMessageCacheKey(roomId);
+            localStorage.setItem(cacheKey, JSON.stringify(messages));
+            
+            // 2. 사용자 쌍 기반 캐시 업데이트 (로그아웃/재로그인에 안전)
+            if (me) {
+                const matchedUserData = JSON.parse(sessionStorage.getItem('matchedUser') || 'null');
+                if (matchedUserData?.id) {
+                    const pairCacheKey = getUserPairCacheKey(me.id, matchedUserData.id);
+                    localStorage.setItem(pairCacheKey, JSON.stringify(messages));
+                    console.log('💾 Chat: 사용자 쌍 캐시도 함께 업데이트됨');
+                }
+            }
+            
+            console.log('💾 Chat: 메시지 캐시 업데이트됨 (총 메시지:', messages.length, '개)');
+        } catch (e) {
+            console.warn('💾 Chat: 메시지 캐시 업데이트 실패:', e);
+        }
+    };
+
+    /* -------- 메시지 로드 (캐싱 포함) -------- */
     const loadMessages = async (roomId: string | number) => {
         const rid = normalizeRoomId(roomId);
+        const cacheKey = getMessageCacheKey(roomId);
+        
+        // 1. 먼저 룸ID 기반 캐시된 메시지 로드
+        let cachedMessages: ChatMessage[] = [];
         try {
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                cachedMessages = JSON.parse(cached);
+                setMessages(cachedMessages);
+                console.log('📚 Chat: 룸ID 기반 캐시된 메시지 로드됨:', cachedMessages.length, '개');
+            }
+        } catch (e) {
+            console.warn('💾 Chat: 룸ID 기반 메시지 캐시 로드 실패:', e);
+        }
+
+        // 2. 룸ID 기반 캐시가 없으면 사용자 쌍 기반 캐시 확인
+        if (cachedMessages.length === 0 && me) {
+            try {
+                const matchedUserData = JSON.parse(sessionStorage.getItem('matchedUser') || 'null');
+                if (matchedUserData?.id) {
+                    const pairCacheKey = getUserPairCacheKey(me.id, matchedUserData.id);
+                    const pairCached = localStorage.getItem(pairCacheKey);
+                    if (pairCached) {
+                        cachedMessages = JSON.parse(pairCached);
+                        setMessages(cachedMessages);
+                        console.log('📚 Chat: 사용자 쌍 기반 캐시된 메시지 로드됨:', cachedMessages.length, '개');
+                    }
+                }
+            } catch (e) {
+                console.warn('💾 Chat: 사용자 쌍 기반 메시지 캐시 로드 실패:', e);
+            }
+        }
+
+        // 2. 서버에서 최신 메시지 가져오기
+        try {
+            console.log('🔄 Chat: 서버에서 메시지 로드 중...', rid);
             const { data } = await api.get(`/api/chat/rooms/${rid}/messages`, {
                 params: { limit: 100, order: 'asc' },
             });
-            const list: ChatMessage[] = Array.isArray(data)
+            const serverMessages: ChatMessage[] = Array.isArray(data)
                 ? data.map((m: any, idx: number) => ({
                     id: m.id ?? idx,
                     roomId: rid,
@@ -369,9 +438,24 @@ const Chat: React.FC = () => {
                     createdAt: m.createdAt ?? new Date().toISOString(),
                 }))
                 : [];
-            setMessages(list);
-        } catch {
-            setMessages([]); // API 없으면 빈 대화에서 시작
+            
+            // 3. 서버 메시지가 있으면 캐시 업데이트
+            if (serverMessages.length > 0) {
+                setMessages(serverMessages);
+                updateMessageCache(serverMessages, roomId);
+                console.log('✅ Chat: 서버 메시지 로드 및 캐시 완료:', serverMessages.length, '개');
+            } else if (cachedMessages.length === 0) {
+                // 서버에도 캐시에도 메시지가 없으면 빈 배열
+                setMessages([]);
+                console.log('📭 Chat: 메시지 없음 (새 채팅방)');
+            }
+            // 서버에 메시지가 없지만 캐시에는 있으면 캐시 유지
+        } catch (error) {
+            console.warn('🚫 Chat: 서버 메시지 로드 실패, 캐시 사용:', error);
+            // 서버 로드 실패 시 캐시된 메시지 유지 (이미 setMessages 호출됨)
+            if (cachedMessages.length === 0) {
+                setMessages([]); // 캐시도 없으면 빈 대화에서 시작
+            }
         }
     };
 
@@ -459,7 +543,12 @@ const Chat: React.FC = () => {
                 };
                 
                 console.log('✅ Chat: 새 메시지 추가:', newMsg);
-                return [...prev, newMsg];
+                const updatedMessages = [...prev, newMsg];
+                
+                // 캐시 업데이트 (roomId + 사용자 쌍 캐시 동시 업데이트)
+                updateMessageCache(updatedMessages, activeRoomId || '');
+                
+                return updatedMessages;
             });
             
             setPeerTyping(false);
@@ -576,7 +665,14 @@ const Chat: React.FC = () => {
                 type: 'TEXT',
                 createdAt: response.data?.createdAt || new Date().toISOString(),
             };
-            setMessages((prev) => [...prev, serverMsg]);
+            setMessages((prev) => {
+                const updatedMessages = [...prev, serverMsg];
+                
+                // 캐시 업데이트 (roomId + 사용자 쌍 캐시 동시 업데이트)
+                updateMessageCache(updatedMessages, activeRoomId);
+                
+                return updatedMessages;
+            });
             setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 10);
         } catch {
             toast.error('메시지 전송 실패');
@@ -763,6 +859,11 @@ const Chat: React.FC = () => {
                                 setIsTyping(true);
                             }}
                             onKeyDown={(e) => {
+                                // 스페이스바는 항상 허용
+                                if (e.key === ' ') {
+                                    // 스페이스바 입력 허용 (기본 동작 유지)
+                                    return;
+                                }
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                     e.preventDefault();
                                     handleSend();
@@ -772,6 +873,42 @@ const Chat: React.FC = () => {
                             className="flex-1 bg-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none placeholder:text-white/50"
                             disabled={!activeRoomId || sending}
                         />
+                        {/* 음악 공유 버튼 */}
+                        <button
+                            onClick={async () => {
+                                const trackInfo = prompt("음악 정보를 입력하세요 (형식: 아티스트 - 곡제목)");
+                                if (trackInfo && trackInfo.includes(" - ")) {
+                                    const [artist, track] = trackInfo.split(" - ");
+                                    console.log('🎵 음악 공유 시도:', { artist: artist.trim(), track: track.trim(), roomId: activeRoomId });
+                                    
+                                    if (socket?.shareMusic) {
+                                        try {
+                                            await socket.shareMusic(activeRoomId || '', {
+                                                trackName: track.trim(),
+                                                artistName: artist.trim(),
+                                                spotifyUrl: ''
+                                            });
+                                            console.log('✅ 음악 공유 완료');
+                                            toast.success(`🎵 ${artist.trim()} - ${track.trim()} 음악을 공유했습니다!`);
+                                        } catch (error) {
+                                            console.error('❌ 음악 공유 실패:', error);
+                                            toast.error('음악 공유에 실패했습니다');
+                                        }
+                                    } else {
+                                        console.warn('⚠️ WebSocket 연결되지 않음');
+                                        toast.error('실시간 연결이 필요합니다');
+                                    }
+                                } else {
+                                    toast.error('올바른 형식으로 입력해주세요 (예: IU - Blueming)');
+                                }
+                            }}
+                            disabled={!activeRoomId || !socket?.isConnected}
+                            className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 hover:text-purple-200 rounded-lg transition-colors disabled:opacity-50 border border-purple-500/30"
+                            title="음악 공유"
+                        >
+                            <Music className="w-5 h-5" />
+                        </button>
+                        
                         <button
                             onClick={handleSend}
                             disabled={!activeRoomId || sending || !input.trim()}

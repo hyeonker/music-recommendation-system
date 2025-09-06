@@ -203,9 +203,10 @@ const Dashboard: React.FC = () => {
                 } catch {}
             }
             
-            // 로그인되지 않은 경우 기본 사용자 사용
+            // 로그인되지 않은 경우 오류 처리
             if (!userId) {
-                userId = 1;
+                console.error('❌ 사용자 인증 실패 - 로그인이 필요합니다');
+                return;
             }
 
             // 좋아요 목록 로드
@@ -386,9 +387,10 @@ const Dashboard: React.FC = () => {
                 } catch {}
             }
             
-            // 로그인되지 않은 경우 기본 사용자 사용
+            // 로그인되지 않은 경우 오류 처리
             if (!userId) {
-                userId = 1;
+                console.error('❌ 사용자 인증 실패 - 로그인이 필요합니다');
+                return;
             }
 
             // 2) 시스템 상태

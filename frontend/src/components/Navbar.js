@@ -121,6 +121,7 @@ const Navbar = ({ darkMode, toggleDarkMode }) => {
         { path: '/matching',  icon: Users,   label: '매칭' },
         { path: '/chat',      icon: MessageCircle, label: '채팅' },
         { path: '/music',     icon: Search,        label: '음악탐색' },
+        { path: '/music-history', icon: Music, label: '음악히스토리' },
         { path: '/reviews',   icon: Star,          label: '리뷰' },
         { path: '/stats',     icon: BarChart3,     label: '통계' },
         { path: '/profile',   icon: Settings,      label: '프로필' },

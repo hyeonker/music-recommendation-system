@@ -1,6 +1,8 @@
 package com.example.musicrecommendation.service;
 
 import com.example.musicrecommendation.domain.UserMatch;
+import com.example.musicrecommendation.domain.User;
+import com.example.musicrecommendation.domain.UserRepository;
 import com.example.musicrecommendation.event.MatchingEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Async;
@@ -22,6 +24,7 @@ public class MatchingQueueService {
     private final RealtimeMatchingService realtimeMatchingService;
     private final SecureChatRoomService secureChatRoomService;
     private final MusicMatchingService musicMatchingService;
+    private final UserRepository userRepository;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     // 매칭 대기열 (사용자 ID별)
@@ -36,10 +39,12 @@ public class MatchingQueueService {
     public MatchingQueueService(RealtimeMatchingService realtimeMatchingService,
                                 SecureChatRoomService secureChatRoomService,
                                 MusicMatchingService musicMatchingService,
+                                UserRepository userRepository,
                                 org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.realtimeMatchingService = realtimeMatchingService;
         this.secureChatRoomService = secureChatRoomService;
         this.musicMatchingService = musicMatchingService;
+        this.userRepository = userRepository;
         this.eventPublisher = eventPublisher;
     }
 
@@ -174,11 +179,15 @@ public class MatchingQueueService {
             }
         }
         
+        // 동적 기준치 계산 (시간 기반)
+        double dynamicThreshold = calculateDynamicThreshold(bestUser1, bestUser2);
+        
         // 최적 매칭 결과 출력
-        if (bestUser1 != null && bestUser2 != null && bestCompatibility >= 0.3) {
+        if (bestUser1 != null && bestUser2 != null && bestCompatibility >= dynamicThreshold) {
             System.out.println("🏆 최적 매칭 발견!");
             System.out.println("최고 유사도 쌍: " + bestUser1 + " <-> " + bestUser2 + 
-                " (유사도: " + String.format("%.3f", bestCompatibility) + ")");
+                " (유사도: " + String.format("%.3f", bestCompatibility) + 
+                ", 적용 기준치: " + String.format("%.3f", dynamicThreshold) + ")");
             
             // 큐에서 해당 사용자들 제거
             matchingQueue.remove(bestUser1);
@@ -191,7 +200,7 @@ public class MatchingQueueService {
         } else if (bestUser1 != null && bestUser2 != null) {
             System.out.println("⚠️ 최고 유사도가 기준치 미달");
             System.out.println("최고 유사도: " + String.format("%.3f", bestCompatibility) + 
-                " (기준: 0.3)");
+                " (적용 기준치: " + String.format("%.3f", dynamicThreshold) + ")");
             System.out.println("매칭 대기 계속...");
             return false;
             
@@ -257,6 +266,49 @@ public class MatchingQueueService {
             defaultMatch.setCommonLikedSongs(0);
             return defaultMatch;
         }
+    }
+
+    /**
+     * 동적 기준치 계산 - 대기 시간에 따라 기준치를 점진적으로 완화
+     */
+    private double calculateDynamicThreshold(Long user1Id, Long user2Id) {
+        if (user1Id == null || user2Id == null) {
+            return 0.3; // 기본 기준치
+        }
+        
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime user1WaitTime = waitingUsers.get(user1Id);
+        LocalDateTime user2WaitTime = waitingUsers.get(user2Id);
+        
+        if (user1WaitTime == null || user2WaitTime == null) {
+            return 0.3; // 기본 기준치
+        }
+        
+        // 두 사용자 중 더 오래 기다린 시간 기준
+        long maxWaitMinutes = Math.max(
+            java.time.Duration.between(user1WaitTime, now).toMinutes(),
+            java.time.Duration.between(user2WaitTime, now).toMinutes()
+        );
+        
+        double threshold;
+        if (maxWaitMinutes == 0) {
+            threshold = 0.3;  // 첫 시도: 기존 기준치 유지 (품질 우선)
+        } else if (maxWaitMinutes <= 1) {
+            threshold = 0.2;  // 1분 이하: 완화된 기준치
+        } else if (maxWaitMinutes <= 2) {
+            threshold = 0.15; // 1-2분: 더 완화된 기준치
+        } else if (maxWaitMinutes <= 3) {
+            threshold = 0.12; // 2-3분: 많이 완화된 기준치
+        } else {
+            threshold = 0.08; // 3분 이상: 최소 기준치 (거의 누구든 매칭)
+        }
+        
+        System.out.println("동적 기준치 계산: " + user1Id + "(" + 
+            java.time.Duration.between(user1WaitTime, now).toMinutes() + "분 대기), " +
+            user2Id + "(" + java.time.Duration.between(user2WaitTime, now).toMinutes() + "분 대기) " +
+            "-> 기준치: " + String.format("%.2f", threshold));
+        
+        return threshold;
     }
 
     /**
@@ -468,6 +520,23 @@ public class MatchingQueueService {
     private void publishMatchingSuccessEvent(Long userId, Long matchedUserId, UserMatch matchData, String chatRoomId) {
         log.info("매칭 성공 이벤트 발행: userId={}, matchedUserId={}", userId, matchedUserId);
         
+        // 실제 사용자 이름 가져오기
+        String matchedUserName = "음악친구";
+        try {
+            User matchedUser = userRepository.findById(matchedUserId).orElse(null);
+            if (matchedUser != null && matchedUser.getName() != null && !matchedUser.getName().trim().isEmpty()) {
+                matchedUserName = matchedUser.getName();
+            } else {
+                matchedUserName = "사용자" + matchedUserId; // 폴백
+            }
+        } catch (Exception e) {
+            log.warn("매칭된 사용자 이름 조회 실패: userId={}, 폴백 이름 사용", matchedUserId, e);
+            matchedUserName = "음악친구"; // 에러 시 폴백
+        }
+        
+        final String finalMatchedUserName = matchedUserName;
+        log.info("매칭된 사용자 이름: {}", finalMatchedUserName);
+        
         // 매칭 데이터 객체 생성
         Object additionalData = new Object() {
             public final String type = "MATCHING_SUCCESS";
@@ -477,7 +546,7 @@ public class MatchingQueueService {
             public final String message = "음악 취향이 비슷한 사용자와 매칭되었습니다!";
             public final Object matchedUser = new Object() {
                 public final Long id = matchedUserId;
-                public final String name = "사용자" + matchedUserId;
+                public final String name = finalMatchedUserName;
                 public final String roomId = chatRoomId;
 
 

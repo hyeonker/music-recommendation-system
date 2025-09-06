@@ -57,6 +57,7 @@ public class SecurityConfig {
                                 "/api/reviews/tags",          // 태그 목록 조회 허용
                                 "/api/badges/**",             // 배지 API 허용 (디버그용)
                                 "/api/likes/**",              // 좋아요 API 허용
+                                "/api/music-sharing-history/**", // 음악 공유 히스토리 API 허용
                                 "/api/admin/**",              // 관리자 API 허용 (컨트롤러에서 권한 체크)
                                 "/actuator/**",
                                 "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**"
@@ -77,6 +78,7 @@ public class SecurityConfig {
                         new AntPathRequestMatcher("/api/badges/**"),
                         new AntPathRequestMatcher("/api/recommendations/**"),
                         new AntPathRequestMatcher("/api/likes/**"),
+                        new AntPathRequestMatcher("/api/music-sharing-history/**"),
                         new AntPathRequestMatcher("/api/admin/**"),
                         new AntPathRequestMatcher("/api/notifications/**"),
                         new AntPathRequestMatcher("/api/auth/local/**")

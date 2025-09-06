@@ -18,7 +18,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [wsManager, setWsManager] = useState<WebSocketManager | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected');
-    const [currentUserId, setCurrentUserId] = useState<number>(1);
+    const [currentUserId, setCurrentUserId] = useState<number>(0); // 기본값을 0으로 변경
     const [currentUserName, setCurrentUserName] = useState<string>('뮤직러버');
 
     // 로그인된 사용자 정보 가져오기
@@ -69,7 +69,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
 
         // 사용자 ID가 설정될 때까지 대기
-        if (currentUserId === 1) {
+        if (currentUserId === 0) {
             console.log('⏳ SocketContext: 사용자 ID 설정 대기 중...');
             return;
         }
@@ -79,6 +79,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // WebSocket 매니저 생성 및 설정 - 실제 사용자 ID 전달
         const manager = new WebSocketManager(currentUserId.toString());
         let isConnected = false; // 중복 연결 상태 추적
+        
+        console.log('🔧 SocketContext: WebSocketManager 생성 완료, 이벤트 핸들러 설정 중...');
 
         // 연결 이벤트 핸들러
         manager.onConnect(() => {
@@ -129,12 +131,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     
                     console.log('🎉 SocketContext: 매칭 성공 메시지 처리중, 데이터:', message.data);
                     
-                    // 단일 매칭 성공 토스트 표시
-                    const matchedUserName = message.data?.matchedUser?.name || '음악친구';
-                    toast.success(`🎉 매칭 성공! ${matchedUserName}님과 연결되었습니다`, {
-                        duration: 4000,
-                        id: `matching-success-${message.data?.roomId}` // 중복 방지 ID
-                    });
+                    // 토스트는 Matching.tsx에서 실제 이름 확인 후 표시 (중복 방지)
                     
                     // 매칭 성공 이벤트 발생
                     console.log('📢 SocketContext: matchingSuccess 커스텀 이벤트 발생');

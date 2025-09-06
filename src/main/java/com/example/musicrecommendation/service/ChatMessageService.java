@@ -124,5 +124,30 @@ public class ChatMessageService {
         return null;
     }
 
+    /**
+     * 해당 채팅방에서 senderId가 아닌 다른 참여자 찾기
+     */
+    @Transactional(readOnly = true)
+    public Long findOtherParticipant(Long roomId, Long senderId) {
+        try {
+            List<Long> participants = repository.findDistinctSenderIdByRoomId(roomId);
+            System.out.println("[ChatMessageService] 채팅방 " + roomId + " 참여자들: " + participants);
+            
+            for (Long participantId : participants) {
+                if (!participantId.equals(senderId)) {
+                    System.out.println("[ChatMessageService] 찾은 다른 참여자: " + participantId);
+                    return participantId;
+                }
+            }
+            
+            System.out.println("[ChatMessageService] 다른 참여자를 찾지 못함");
+            return null;
+            
+        } catch (Exception e) {
+            System.err.println("[ChatMessageService] findOtherParticipant 실패: " + e.getMessage());
+            return null;
+        }
+    }
+
     public record ChatMessageDto(Long id, Long roomId, Long senderId, String content, Instant createdAt) { }
 }

@@ -239,20 +239,25 @@ public class UserSongLikeService {
     }
 
     /**
-     * 외부 서비스의 곡 좋아요 취소
+     * 외부 서비스의 곡 좋아요 취소 (title + artist 기반)
+     * 좋아요할 때와 동일한 방식으로 곡을 찾아서 취소합니다.
      *
      * @param userId 사용자 ID
-     * @param externalId 외부 서비스 ID
+     * @param title 곡 제목
+     * @param artist 아티스트명
      * @return true: 좋아요 취소됨, false: 좋아요 상태가 아니었음
      */
     @Transactional
-    public boolean unlikeExternalSong(Long userId, String externalId) {
-        // 외부 ID로 Song 찾기
-        Song song = findSongByExternalId(externalId);
-        if (song == null) {
+    public boolean unlikeExternalSongByTitleArtist(Long userId, String title, String artist) {
+        // title과 artist로 Song 찾기 (좋아요할 때와 동일한 방식)
+        Optional<Song> songOpt = songRepository.findByTitleAndArtist(title, artist);
+        
+        if (songOpt.isEmpty()) {
             return false; // 곡이 존재하지 않음
         }
-
+        
+        Song song = songOpt.get();
+        
         // 좋아요 찾기
         Optional<UserSongLike> existingLike = userSongLikeRepository.findByUserIdAndSongId(userId, song.getId());
         
@@ -262,6 +267,30 @@ public class UserSongLikeService {
         }
 
         return false; // 좋아요 상태가 아니었음
+    }
+
+    /**
+     * 외부 서비스의 곡 좋아요 취소
+     * Spotify ID를 이용하여 기존 좋아요를 찾아 취소합니다.
+     *
+     * @param userId 사용자 ID
+     * @param externalId 외부 서비스 ID (Spotify ID)
+     * @return true: 좋아요 취소됨, false: 좋아요 상태가 아니었음
+     */
+    @Transactional
+    public boolean unlikeExternalSong(Long userId, String externalId) {
+        // 해시코드를 이용한 Song ID 생성 (Math.abs 사용하여 양수 보장)
+        Long songIdAsLong = (long) Math.abs(externalId.hashCode());
+        
+        // 좋아요 찾기
+        Optional<UserSongLike> existingLike = userSongLikeRepository.findByUserIdAndSongId(userId, songIdAsLong);
+        
+        if (existingLike.isPresent()) {
+            userSongLikeRepository.delete(existingLike.get());
+            return true; // 좋아요 취소됨
+        }
+
+        return false; // 좋아요 상태가 아니었음 또는 곡이 존재하지 않음
     }
 
     /**
@@ -292,13 +321,14 @@ public class UserSongLikeService {
 
     /**
      * 외부 ID로 Song 찾기
+     * Math.abs를 사용하여 양수 ID 보장
      */
     private Song findSongByExternalId(String externalId) {
         // 실제로는 externalId로 찾아야 하지만, 현재 구조에서는 불가능
         // 임시로 해시코드를 이용한 매핑을 사용
         // 이는 완벽하지 않은 방법이므로 나중에 개선 필요
         
-        Long songId = (long) externalId.hashCode();
+        Long songId = (long) Math.abs(externalId.hashCode());
         return songRepository.findById(songId).orElse(null);
     }
 }

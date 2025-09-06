@@ -16,4 +16,7 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     @Modifying
     @Query("delete from ChatMessage m where m.createdAt < :threshold and m.holdForDispute = false")
     int deleteOlderThan(@Param("threshold") OffsetDateTime threshold);
+    
+    @Query("SELECT DISTINCT m.senderId FROM ChatMessage m WHERE m.roomId = :roomId")
+    List<Long> findDistinctSenderIdByRoomId(@Param("roomId") Long roomId);
 }

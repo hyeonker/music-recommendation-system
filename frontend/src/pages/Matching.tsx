@@ -38,8 +38,8 @@ const Matching: React.FC = () => {
     const { isConnected, requestMatching } = useSocket();
     const navigate = useNavigate();
 
-    // 로그인 사용자 ID (있으면 /api/auth/me 사용, 없으면 1)
-    const [userId, setUserId] = useState<number>(1);
+    // 로그인 사용자 ID (인증될 때까지 0)
+    const [userId, setUserId] = useState<number>(0);
     
     // 매칭된 사용자의 대표 배지
     const [matchedUserBadge, setMatchedUserBadge] = useState<RepresentativeBadge | null>(null);
@@ -50,9 +50,22 @@ const Matching: React.FC = () => {
                 // OAuth 인증 확인
                 const { data } = await api.get('/api/auth/me');
                 console.log('🔍 OAuth 인증 응답:', data);
-                if (data?.authenticated && data?.user?.id) {
-                    console.log('✅ OAuth 인증 성공, userId 설정:', data.user.id);
-                    setUserId(Number(data.user.id));
+                console.log('🔍 OAuth data.user:', data?.user);
+                
+                // OAuth 응답 구조 확인: principal.response 안에 실제 데이터가 있을 수 있음
+                let actualUserId = null;
+                if (data?.authenticated) {
+                    // 다양한 경로에서 사용자 ID 찾기
+                    actualUserId = data.user?.id || 
+                                  data.principal?.response?.id || 
+                                  data.principal?.id ||
+                                  data.id;
+                    console.log('🔍 추출된 사용자 ID:', actualUserId);
+                }
+                
+                if (actualUserId) {
+                    console.log('✅ OAuth 인증 성공, userId 설정:', actualUserId);
+                    setUserId(Number(actualUserId));
                 } else {
                     // 로컬 인증 확인
                     try {
@@ -62,7 +75,7 @@ const Matching: React.FC = () => {
                             console.log('✅ 로컬 인증 성공, userId 설정:', localAuthResponse.data.user.id);
                             setUserId(Number(localAuthResponse.data.user.id));
                         } else {
-                            console.log('❌ 로컬 인증 실패, userId=1 유지');
+                            console.log('❌ 로컬 인증 실패, userId=0 유지');
                         }
                     } catch (localError) {
                         console.log('❌ 로컬 인증 오류:', localError);
@@ -74,11 +87,106 @@ const Matching: React.FC = () => {
             
             // 🧹 기존 데이터 클리어 - 새로운 UUID 기반 시스템으로 완전 전환
             clearLegacyData();
-            
-            checkMatchingStatus();
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // userId가 설정되면 캐시 정리 후 매칭 상태 확인
+    useEffect(() => {
+        if (userId > 0) {
+            console.log(`👤 사용자 인증 완료, 매칭 상태 확인 - userId: ${userId}`);
+            
+            // 🧹 강화된 캐시 검증 및 정리 시스템
+            const performCacheValidation = () => {
+                let shouldClearCache = false;
+                let clearReason = '';
+
+                const cachedMatchedUser = sessionStorage.getItem('matchedUser');
+                const cachedRoomId = sessionStorage.getItem('lastRoomId');
+                
+                if (cachedMatchedUser) {
+                    try {
+                        const parsedUser = JSON.parse(cachedMatchedUser);
+                        
+                        // 1. 자기 자신과 매칭된 경우 (가장 명백한 오류)
+                        if (parsedUser.id === userId) {
+                            shouldClearCache = true;
+                            clearReason = '자기 자신과 매칭된 잘못된 캐시';
+                        }
+                        
+                        // 2. 유효하지 않은 사용자 ID (0, null, undefined)
+                        else if (!parsedUser.id || parsedUser.id <= 0) {
+                            shouldClearCache = true;
+                            clearReason = '유효하지 않은 매칭 사용자 ID';
+                        }
+                        
+                        // 3. 매칭 사용자 이름이 없거나 기본값인 경우 (불완전한 데이터)
+                        else if (!parsedUser.name || parsedUser.name.trim() === '' || parsedUser.name === '음악친구') {
+                            shouldClearCache = true;
+                            clearReason = '불완전한 매칭 사용자 정보';
+                        }
+                        
+                        // 4. roomId 검증 - 숫자형이거나 유효하지 않은 경우
+                        if (cachedRoomId && (/^\d+$/.test(cachedRoomId) || cachedRoomId === 'null' || cachedRoomId === 'undefined')) {
+                            shouldClearCache = true;
+                            clearReason = clearReason || '유효하지 않은 roomId 형식';
+                        }
+                        
+                        // 5. 캐시 생성 시간 검증 (1시간 이상 오래된 캐시)
+                        const cacheTimestamp = sessionStorage.getItem('matchingCacheTimestamp');
+                        if (cacheTimestamp) {
+                            const cacheAge = Date.now() - parseInt(cacheTimestamp);
+                            const oneHour = 60 * 60 * 1000; // 1시간
+                            if (cacheAge > oneHour) {
+                                shouldClearCache = true;
+                                clearReason = clearReason || '만료된 캐시 (1시간 초과)';
+                            }
+                        } else {
+                            // 타임스탬프가 없는 경우 오래된 캐시로 간주
+                            shouldClearCache = true;
+                            clearReason = clearReason || '타임스탬프 없는 오래된 캐시';
+                        }
+
+                    } catch (parseError) {
+                        shouldClearCache = true;
+                        clearReason = '캐시 파싱 오류';
+                        console.error('캐시 파싱 실패:', parseError);
+                    }
+                } else if (cachedRoomId) {
+                    // matchedUser 없이 roomId만 있는 경우 (불일치 상태)
+                    shouldClearCache = true;
+                    clearReason = 'roomId만 있고 매칭 사용자 정보 없음';
+                }
+
+                // 캐시 정리 실행
+                if (shouldClearCache) {
+                    console.log(`🧹 캐시 정리 실행 - 사유: ${clearReason}`);
+                    sessionStorage.removeItem('lastRoomId');
+                    sessionStorage.removeItem('matchedUser');
+                    sessionStorage.removeItem('matchingCacheTimestamp');
+                    localStorage.removeItem('chatRoomId'); // 로컬 스토리지도 함께 정리
+                    
+                    // 매칭 상태도 초기화
+                    setMatchingStatus('IDLE');
+                    setMatchedUser(null);
+                    
+                    console.log(`✅ 캐시 정리 완료 - ${clearReason}`);
+                } else if (cachedMatchedUser && cachedRoomId) {
+                    console.log('✅ 캐시 검증 통과 - 유효한 매칭 데이터');
+                } else {
+                    console.log('💭 캐시 없음 - 새로운 세션');
+                }
+            };
+            
+            // 캐시 검증 실행
+            performCacheValidation();
+            
+            // 캐시 정리 후 매칭 상태 확인
+            setTimeout(() => {
+                checkMatchingStatus();
+            }, 100); // 캐시 정리 후 약간의 지연을 두고 상태 확인
+        }
+    }, [userId]);
     
     // 기존 숫자형 roomId 및 관련 데이터 클리어
     const clearLegacyData = () => {
@@ -132,11 +240,13 @@ const Matching: React.FC = () => {
             setMatchingStatus('MATCHED');
             setMatchedUser(mUser);
 
-            // ✅ 채팅 이동 대비: 세션에 저장
+            // 🔒 사용자별 격리된 캐시 저장 시스템
             if (roomId) {
                 sessionStorage.setItem('lastRoomId', String(roomId));
             }
             sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
+            sessionStorage.setItem('matchingCacheTimestamp', String(Date.now())); // 캐시 생성 시간
+            sessionStorage.setItem('matchingCacheOwner', String(userId)); // 캐시 소유자
             
             // 매칭 성공 토스트는 SocketContext에서 이미 처리됨 - 중복 방지
             console.log('✅ 매칭 상태 업데이트 완료 (토스트는 SocketContext에서 처리)');
@@ -158,9 +268,9 @@ const Matching: React.FC = () => {
     }, []);
 
     const checkMatchingStatus = async () => {
-        // 🛡️ 안전 장치: 이미 매칭 중이거나 처리 중이면 중복 호출 방지
-        if (isMatching || matchingStatus === 'WAITING') {
-            console.log(`🔒 매칭 상태 확인 건너뜀 - 현재 상태: ${matchingStatus}, 처리 중: ${isMatching}`);
+        // 🛡️ 안전 장치: 사용자 ID가 없거나 이미 매칭 중이면 중복 호출 방지
+        if (userId === 0 || isMatching || matchingStatus === 'WAITING') {
+            console.log(`🔒 매칭 상태 확인 건너뜀 - userId: ${userId}, 현재 상태: ${matchingStatus}, 처리 중: ${isMatching}`);
             return;
         }
 
@@ -174,18 +284,67 @@ const Matching: React.FC = () => {
             if (cachedRoomId && cachedMatchedUser && cachedRoomId !== 'null') {
                 try {
                     const parsedUser = JSON.parse(cachedMatchedUser);
-                    console.log('💾 캐시된 매칭 정보 복원:', { roomId: cachedRoomId, user: parsedUser });
                     
-                    setMatchingStatus('MATCHED');
-                    setMatchedUser({
-                        id: parsedUser.id,
-                        name: parsedUser.name,
-                        chatRoomId: cachedRoomId
-                    });
-                    console.log('✅ 캐시 기반 매칭 상태 복원 완료 (API 호출 없음)');
-                    return; // API 호출 완전 회피
+                    // 🔒 사용자별 캐시 격리 검증 시스템
+                    const isValidCacheForCurrentUser = () => {
+                        // 1. 기본 유효성 검사
+                        if (!parsedUser.id || parsedUser.id <= 0 || parsedUser.id === userId) {
+                            return false;
+                        }
+                        
+                        // 2. 캐시 소유자 검증 (사용자별 고유 키)
+                        const cacheOwner = sessionStorage.getItem('matchingCacheOwner');
+                        if (cacheOwner && parseInt(cacheOwner) !== userId) {
+                            console.log(`⚠️ 다른 사용자(${cacheOwner})의 캐시가 남아있음 - 현재 사용자: ${userId}`);
+                            return false;
+                        }
+                        
+                        // 3. 타임스탬프 검증
+                        const cacheTimestamp = sessionStorage.getItem('matchingCacheTimestamp');
+                        if (cacheTimestamp) {
+                            const cacheAge = Date.now() - parseInt(cacheTimestamp);
+                            const maxCacheAge = 2 * 60 * 60 * 1000; // 2시간
+                            if (cacheAge > maxCacheAge) {
+                                console.log(`⏰ 캐시 만료됨 - ${Math.floor(cacheAge / (60 * 1000))}분 경과`);
+                                return false;
+                            }
+                        }
+                        
+                        // 4. roomId 형식 검증 (UUID 형식이어야 함)
+                        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+                        if (!uuidRegex.test(cachedRoomId)) {
+                            console.log(`⚠️ 잘못된 roomId 형식: ${cachedRoomId}`);
+                            return false;
+                        }
+                        
+                        return true;
+                    };
+                    
+                    if (isValidCacheForCurrentUser()) {
+                        console.log('💾 유효한 캐시 복원:', { roomId: cachedRoomId, user: parsedUser, userId });
+                        
+                        setMatchingStatus('MATCHED');
+                        setMatchedUser({
+                            id: parsedUser.id,
+                            name: parsedUser.name,
+                            chatRoomId: cachedRoomId
+                        });
+                        console.log('✅ 검증된 캐시 기반 매칭 상태 복원 완료');
+                        return; // API 호출 완전 회피
+                    } else {
+                        console.log('🚫 캐시 검증 실패 - 강제 정리 후 API 호출');
+                        sessionStorage.removeItem('lastRoomId');
+                        sessionStorage.removeItem('matchedUser');
+                        sessionStorage.removeItem('matchingCacheTimestamp');
+                        sessionStorage.removeItem('matchingCacheOwner');
+                    }
                 } catch (parseError) {
                     console.warn('캐시 파싱 실패, API 호출로 폴백:', parseError);
+                    // 파싱 오류 시 캐시 완전 정리
+                    sessionStorage.removeItem('lastRoomId');
+                    sessionStorage.removeItem('matchedUser');
+                    sessionStorage.removeItem('matchingCacheTimestamp');
+                    sessionStorage.removeItem('matchingCacheOwner');
                 }
             }
 
@@ -215,11 +374,14 @@ const Matching: React.FC = () => {
                 
                 console.log(`✅ 서버 기존 매칭 발견 - User ${userId} <-> User ${data?.matchedWith}, Room: ${roomId}`);
 
-                // 세션에 저장하여 다음번엔 API 호출 회피
+                // 🔒 사용자별 격리된 캐시 저장 시스템
                 if (roomId) {
                     sessionStorage.setItem('lastRoomId', String(roomId));
                 }
                 sessionStorage.setItem('matchedUser', JSON.stringify({ id: mUser.id, name: mUser.name }));
+                sessionStorage.setItem('matchingCacheTimestamp', String(Date.now())); // 캐시 생성 시간
+                sessionStorage.setItem('matchingCacheOwner', String(userId)); // 캐시 소유자
+                console.log(`🔐 사용자별 캐시 저장 완료 - Owner: ${userId}, RoomId: ${roomId}`);
             } else if (status === 'WAITING') {
                 setQueuePosition(data?.queuePosition || 0);
                 console.log(`⏳ 서버 대기 상태 발견 - User ${userId}, Queue Position: ${data?.queuePosition}`);
@@ -293,11 +455,16 @@ const Matching: React.FC = () => {
     const goChat = () => {
         const roomId = matchedUser?.chatRoomId || sessionStorage.getItem('lastRoomId');
         if (roomId) {
-            // 안전을 위해 다시 저장
+            // 🔒 사용자별 격리된 캐시 저장 시스템 (채팅 이동 시)
             sessionStorage.setItem('lastRoomId', String(roomId));
             if (matchedUser?.id && matchedUser?.name) {
                 sessionStorage.setItem('matchedUser', JSON.stringify({ id: matchedUser.id, name: matchedUser.name }));
             }
+            // 캐시 메타데이터 유지/업데이트
+            sessionStorage.setItem('matchingCacheTimestamp', String(Date.now())); 
+            sessionStorage.setItem('matchingCacheOwner', String(userId));
+            console.log(`🚀 채팅 이동 - 캐시 메타데이터 업데이트 완료 (Owner: ${userId})`);
+            
             navigate(`/chat?roomId=${roomId}`);
         } else {
             navigate('/chat'); // 방 정보 없으면 채팅으로만 이동
@@ -649,6 +816,89 @@ const Matching: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* 매칭 알고리즘 안내 */}
+            <div className="glass-card p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-gray-800 dark:text-white flex items-center space-x-2">
+                        <Zap className="w-5 h-5 text-yellow-500" />
+                        <span>더 나은 매칭을 위한 안내</span>
+                    </h3>
+                </div>
+                
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl p-4 mb-4">
+                    <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">
+                        🎯 AI 매칭 알고리즘은 다음 요소들을 분석하여 음악 취향이 비슷한 사용자를 찾습니다.
+                        <span className="font-semibold text-purple-600 dark:text-purple-400"> 활동이 많을수록 더 정확한 매칭이 가능해요!</span>
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 border-l-4 border-red-400">
+                        <div className="font-semibold text-red-600 dark:text-red-400 mb-1">
+                            💖 도움이 됨 매칭 (25%)
+                        </div>
+                        <div className="text-gray-600 dark:text-gray-400 text-xs">
+                            리뷰에 "도움이 됨" 클릭 시 분석
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 border-l-4 border-pink-400">
+                        <div className="font-semibold text-pink-600 dark:text-pink-400 mb-1">
+                            ❤️ 좋아요 음악 매칭 (20%)
+                        </div>
+                        <div className="text-gray-600 dark:text-gray-400 text-xs">
+                            좋아요 표시한 음악 분석
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 border-l-4 border-purple-400">
+                        <div className="font-semibold text-purple-600 dark:text-purple-400 mb-1">
+                            🎪 참여 페스티벌 (15%)
+                        </div>
+                        <div className="text-gray-600 dark:text-gray-400 text-xs">
+                            프로필에 페스티벌 경험 추가
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 border-l-4 border-blue-400">
+                        <div className="font-semibold text-blue-600 dark:text-blue-400 mb-1">
+                            🎤 선호 아티스트 (15%)
+                        </div>
+                        <div className="text-gray-600 dark:text-gray-400 text-xs">
+                            프로필에 좋아하는 아티스트 설정
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 border-l-4 border-green-400">
+                        <div className="font-semibold text-green-600 dark:text-green-400 mb-1">
+                            🎶 선호 장르 (15%)
+                        </div>
+                        <div className="text-gray-600 dark:text-gray-400 text-xs">
+                            프로필에 선호 장르 설정
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 border-l-4 border-yellow-400">
+                        <div className="font-semibold text-yellow-600 dark:text-yellow-400 mb-1">
+                            🌙 음악 무드 & 기타 (10%)
+                        </div>
+                        <div className="text-gray-600 dark:text-gray-400 text-xs">
+                            프로필에 음악 선호도 상세 설정
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-4 p-3 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                    <div className="flex items-start space-x-2">
+                        <AlertCircle className="w-4 h-4 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                        <div className="text-xs text-green-700 dark:text-green-300">
+                            <span className="font-semibold">💡 빠른 매칭 팁:</span>
+                            <span className="ml-1">음악 탐색에서 좋아요 클릭 → 리뷰 작성 → 프로필 설정 완료 → 매칭 품질 향상!</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             {/* 매칭 시스템 현황 (실시간 데이터) */}
             <div className="glass-card p-6">

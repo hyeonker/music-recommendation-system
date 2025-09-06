@@ -230,6 +230,58 @@ public class EnhancedWebSocketController {
         }
     }
 
+    /** 음악 공유 처리 */
+    @MessageMapping("/share-music")
+    @SendToUser("/queue/share-music-response")
+    public Object handleShareMusic(@Payload Map<String, Object> musicData, Principal principal) {
+        try {
+            String roomId = (String) musicData.get("roomId");
+            String trackName = (String) musicData.get("trackName");
+            String artistName = (String) musicData.get("artistName");
+            String spotifyUrl = (String) musicData.getOrDefault("spotifyUrl", "");
+            Long senderId = extractUserIdFromPrincipal(principal);
+            
+            log.info("[WS] recv /share-music roomId={}, track={}, artist={}", 
+                    roomId, trackName, artistName);
+            
+            if (roomId == null || trackName == null || artistName == null) {
+                return new Object() {
+                    public final boolean success = false;
+                    public final String error = "roomId, trackName, artistName은 필수입니다";
+                    public final String timestamp = LocalDateTime.now().toString();
+                };
+            }
+            
+            if (senderId == null) {
+                return new Object() {
+                    public final boolean success = false;
+                    public final String error = "사용자 인증이 필요합니다";
+                    public final String timestamp = LocalDateTime.now().toString();
+                };
+            }
+            
+            // ChatRoomService를 통해 음악 공유 (자동으로 히스토리에도 저장됨)
+            Object result = chatRoomService.shareMusicTrack(roomId, senderId, trackName, artistName, spotifyUrl);
+            
+            log.info("[WS] 음악 공유 완료: senderId={}, track={} - {}", senderId, artistName, trackName);
+            
+            return new Object() {
+                public final boolean success = true;
+                public final String message = "음악이 공유되었습니다";
+                public final Object shareResult = result;
+                public final String timestamp = LocalDateTime.now().toString();
+            };
+            
+        } catch (Exception e) {
+            log.error("handleShareMusic error", e);
+            return new Object() {
+                public final boolean success = false;
+                public final String error = "음악 공유 중 오류: " + e.getMessage();
+                public final String timestamp = LocalDateTime.now().toString();
+            };
+        }
+    }
+
     private Long extractUserIdFromPrincipal(Principal principal) {
         if (principal != null && principal.getName() != null) {
             try {

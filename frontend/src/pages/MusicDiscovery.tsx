@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Heart, Play, Music, Loader, Star } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import api from '../api/client';
 import { validateMusicSearch } from '../utils/security';
 
@@ -41,20 +42,40 @@ const MusicDiscovery: React.FC = () => {
 
     const loadUserLikes = async () => {
         try {
-            let userId = 1;
+            let userId: number | null = null;
             try {
                 const me = await api.get('/api/auth/me');
                 if (me?.data?.authenticated && me?.data?.user?.id) {
                     userId = Number(me.data.user.id);
                 }
-            } catch {
-                // 기본값 사용
+            } catch {}
+            
+            // OAuth 로그인이 안되어 있으면 로컬 로그인 확인
+            if (!userId) {
+                try {
+                    const localMe = await api.get('/api/auth/local/me');
+                    if (localMe?.data?.success && localMe?.data?.user?.id) {
+                        userId = Number(localMe.data.user.id);
+                    }
+                } catch {}
+            }
+            
+            // 로그인되지 않은 경우 오류 처리
+            if (!userId) {
+                console.error('❌ 사용자 인증 실패 - 로그인이 필요합니다');
+                return;
             }
 
             const response = await api.get(`/api/likes/user/${userId}`);
-            const likes = response.data?.content || response.data || [];
-            const likedIds = likes.map((like: any) => like.externalId || like.songId || like.song?.externalId).filter(Boolean);
-            setLikedTracks(new Set(likedIds));
+            const likes = response.data?.content || [];
+            // 좋아요된 곡들을 title+artist 조합으로 Set 생성
+            const likedSongs = likes.map((like: any) => {
+                if (like.song) {
+                    return `${like.song.title}::${like.song.artist}`.toLowerCase();
+                }
+                return null;
+            }).filter(Boolean);
+            setLikedTracks(new Set(likedSongs));
         } catch (error) {
             console.warn('좋아요 목록 불러오기 실패:', error);
         }
@@ -62,16 +83,37 @@ const MusicDiscovery: React.FC = () => {
 
     const toggleTrackLike = async (track: SearchResult) => {
         try {
-            const isCurrentlyLiked = likedTracks.has(track.id);
+            const trackKey = `${track.title}::${track.artist}`.toLowerCase();
+            const isCurrentlyLiked = likedTracks.has(trackKey);
 
             if (isCurrentlyLiked) {
-                await api.delete(`/api/likes/song/${track.id}`);
+                // 이미 좋아요한 음악을 취소할 때 확인
+                const shouldRemove = window.confirm(
+                    `"${track.title} - ${track.artist}"를 좋아요 목록에서 제거하시겠습니까?`
+                );
+                
+                if (!shouldRemove) {
+                    return; // 사용자가 취소한 경우
+                }
+
+                // 좋아요 취소 처리 (title과 artist query parameter 추가)
+                await api.delete(`/api/likes/song/${track.id}?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist)}`);
                 setLikedTracks(prev => {
                     const newSet = new Set(prev);
-                    newSet.delete(track.id);
+                    newSet.delete(trackKey);
                     return newSet;
                 });
+                
+                // 취소 완료 메시지
+                toast.success(
+                    `"${track.title} - ${track.artist}"를 좋아요 목록에서 제거했습니다.`,
+                    { 
+                        duration: 2000,
+                        icon: '💔'
+                    }
+                );
             } else {
+                // 새로운 좋아요 추가
                 const likeData = {
                     songId: track.id,
                     title: track.title,
@@ -86,13 +128,22 @@ const MusicDiscovery: React.FC = () => {
                 await api.post('/api/likes/song', likeData);
                 setLikedTracks(prev => {
                     const newSet = new Set(prev);
-                    newSet.add(track.id);
+                    newSet.add(trackKey);
                     return newSet;
                 });
+                
+                // 성공 메시지
+                toast.success(
+                    `"${track.title} - ${track.artist}"를 좋아요 목록에 추가했습니다!`,
+                    { 
+                        duration: 2000,
+                        icon: '✅'
+                    }
+                );
             }
         } catch (error) {
             console.error('좋아요 처리 실패:', error);
-            alert('좋아요 처리 중 오류가 발생했습니다.');
+            toast.error('좋아요 처리 중 오류가 발생했습니다.');
         }
     };
 
@@ -109,6 +160,47 @@ const MusicDiscovery: React.FC = () => {
         setError(null);
 
         try {
+            // 검색 전에 최신 좋아요 목록을 다시 불러오기
+            console.log('🔄 검색 전 좋아요 목록 새로고침...');
+            
+            // 좋아요 목록을 다시 불러오기 (최신 상태로 업데이트)
+            let updatedLikedTracks = new Set<string>();
+            try {
+                let userId: number | null = null;
+                try {
+                    const me = await api.get('/api/auth/me');
+                    if (me?.data?.authenticated && me?.data?.user?.id) {
+                        userId = Number(me.data.user.id);
+                    }
+                } catch {}
+                
+                if (!userId) {
+                    try {
+                        const localMe = await api.get('/api/auth/local/me');
+                        if (localMe?.data?.success && localMe?.data?.user?.id) {
+                            userId = Number(localMe.data.user.id);
+                        }
+                    } catch {}
+                }
+                
+                if (userId) {
+                    const response = await api.get(`/api/likes/user/${userId}`);
+                    const likes = response.data?.content || [];
+                    // 좋아요된 곡들을 title+artist 조합으로 Set 생성
+                    const likedSongs = likes.map((like: any) => {
+                        if (like.song) {
+                            return `${like.song.title}::${like.song.artist}`.toLowerCase();
+                        }
+                        return null;
+                    }).filter(Boolean);
+                    updatedLikedTracks = new Set(likedSongs);
+                    setLikedTracks(updatedLikedTracks);
+                    console.log('✅ 좋아요 목록 업데이트 완료:', Array.from(updatedLikedTracks));
+                }
+            } catch (error) {
+                console.warn('좋아요 목록 새로고침 실패:', error);
+            }
+            
             const response = await api.get(`/api/spotify/search?q=${encodeURIComponent(validation.sanitized)}&type=track&limit=20`);
             
             if (response.data?.tracks?.items) {
@@ -121,9 +213,21 @@ const MusicDiscovery: React.FC = () => {
                     previewUrl: track.preview_url,
                     spotifyUrl: track.external_urls.spotify,
                     // duration: track.duration_ms, // 청취 기능 없으므로 제거
-                    popularity: track.popularity
+                    popularity: track.popularity,
+                    isLiked: updatedLikedTracks.has(`${track.name}::${track.artists.map(a => a.name).join(', ')}`.toLowerCase()) // title+artist 조합으로 체크
                 }));
+                
                 setSearchResults(results);
+                
+                // 검색 결과에서 이미 좋아요한 곡들이 있는지 콘솔에 표시 (디버깅용)
+                const alreadyLiked = results.filter(track => updatedLikedTracks.has(`${track.title}::${track.artist}`.toLowerCase()));
+                if (alreadyLiked.length > 0) {
+                    console.log(`🔍 검색 결과 중 ${alreadyLiked.length}개 곡이 이미 좋아요 목록에 있습니다:`, 
+                        alreadyLiked.map(t => `${t.title} - ${t.artist}`));
+                    console.log('❤️ 현재 좋아요 목록:', Array.from(updatedLikedTracks));
+                } else {
+                    console.log('🔍 검색 결과 중 좋아요한 곡이 없습니다.');
+                }
             } else {
                 setSearchResults([]);
             }
@@ -265,16 +369,22 @@ const MusicDiscovery: React.FC = () => {
                                         >
                                             <Music className="w-5 h-5" />
                                         </button>
-                                        <div title={likedTracks.has(track.id) ? "좋아요 취소" : "좋아요"}>
-                                            <Heart
-                                                className={`w-5 h-5 cursor-pointer transition-colors ${
-                                                    likedTracks.has(track.id)
-                                                        ? 'text-red-500 fill-current'
-                                                        : 'text-red-400 hover:text-red-300'
-                                                }`}
-                                                onClick={() => toggleTrackLike(track)}
-                                            />
-                                        </div>
+                                        {(() => {
+                                            const trackKey = `${track.title}::${track.artist}`.toLowerCase();
+                                            const isLiked = likedTracks.has(trackKey);
+                                            return (
+                                                <div title={isLiked ? "좋아요 취소 (클릭 시 확인 후 제거)" : "좋아요 추가"}>
+                                                    <Heart
+                                                        className={`w-5 h-5 cursor-pointer transition-colors ${
+                                                            isLiked
+                                                                ? 'text-red-500 fill-current'
+                                                                : 'text-red-400 hover:text-red-300'
+                                                        }`}
+                                                        onClick={() => toggleTrackLike(track)}
+                                                    />
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                             </div>

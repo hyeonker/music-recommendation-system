@@ -13,6 +13,7 @@ import Profile from './pages/Profile';
 import Reviews from './pages/Reviews';
 import AdminPanel from './pages/AdminPanel';
 import MusicDiscovery from './pages/MusicDiscovery';
+import MusicHistory from './pages/MusicHistory';
 import LoadingSpinner from './components/LoadingSpinner';
 import RequireAuth from './components/RequireAuth';   // ⭐ 추가: 로그인 가드
 import SocialAuth from './components/SocialAuth';     // ⭐ 선택: /login 전용 페이지에서 사용
@@ -185,6 +186,16 @@ function App() {
                                             element={
                                                 <RequireAuth>
                                                     <Profile />
+                                                </RequireAuth>
+                                            }
+                                        />
+
+                                        {/* ⭐ 로그인 필요: 음악 히스토리 */}
+                                        <Route
+                                            path="/music-history"
+                                            element={
+                                                <RequireAuth>
+                                                    <MusicHistory />
                                                 </RequireAuth>
                                             }
                                         />

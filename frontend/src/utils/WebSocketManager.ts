@@ -22,7 +22,7 @@ export class WebSocketManager {
     private reconnectAttempts: number = 0;
     private maxReconnectAttempts: number = 5;
     private subscriptions: Map<string, any> = new Map();
-    private currentUserId: string = '1'; // 기본값
+    private currentUserId: string = '0'; // 기본값 - 0은 인증되지 않은 상태
 
     // 이벤트 핸들러들
     private onConnectHandler?: () => void;
@@ -36,16 +36,19 @@ export class WebSocketManager {
             this.currentUserId = userId;
             console.log('🚀 WebSocketManager 사용자 ID 설정:', userId);
         }
+        // 동기적으로 클라이언트 설정 후 비동기 초기화
+        this.setupClient();
+        console.log('🚀 WebSocketManager 클라이언트 설정 완료');
+        
         // 초기화만 하고 연결은 외부에서 호출하도록 변경
         this.initializeUserId().then(() => {
-            this.setupClient();
-            console.log('🚀 WebSocketManager 초기화 완료, 연결 대기');
+            console.log('🚀 WebSocketManager 초기화 완료, 연결 준비됨');
         });
     }
 
     private async initializeUserId() {
         // 생성자에서 이미 ID가 설정되었으면 추가 인증 불필요
-        if (this.currentUserId !== '1') {
+        if (this.currentUserId !== '0') {
             console.log('WebSocketManager: 사용자 ID 이미 설정됨:', this.currentUserId);
             return;
         }
@@ -103,19 +106,31 @@ export class WebSocketManager {
                 this.isConnected = true;
                 this.reconnectAttempts = 0;
                 
-                // 연결 후 잠깐 대기 후 구독 설정 (안정성 향상)
+                // 연결 후 충분한 대기 시간으로 구독 설정 (안정성 향상)
                 setTimeout(() => {
-                    console.log('📡 구독 설정 시작...');
+                    console.log('📡 구독 설정 시작... (userId:', this.currentUserId + ')');
                     this.setupSubscriptions();
-                    this.onConnectHandler?.();
-                }, 100);
+                    
+                    // 구독 설정 완료 후 추가 대기 시간
+                    setTimeout(() => {
+                        console.log('✅ WebSocket 완전 초기화 완료');
+                        this.onConnectHandler?.();
+                    }, 200);
+                }, 300); // 300ms로 증가
             },
 
             // 연결 해제 콜백
             onDisconnect: () => {
-                console.log('WebSocket 연결 해제');
+                console.log('⚠️ WebSocket 연결 해제 (userId:', this.currentUserId + ')');
                 this.isConnected = false;
+                this.subscriptions.clear();
                 this.onDisconnectHandler?.();
+                
+                // 자동 재연결 시도
+                if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                    console.log('🔄 WebSocket 자동 재연결 스케줄링...');
+                    this.scheduleReconnect();
+                }
             },
 
             // 연결 오류 콜백
@@ -134,14 +149,28 @@ export class WebSocketManager {
 
     // WebSocket 연결
     public connect(): void {
-        if (this.client && !this.isConnected) {
-            try {
-                console.log('🔌 WebSocket 연결 시도 중...');
-                this.client.activate();
-            } catch (error) {
-                console.error('WebSocket 연결 실패:', error);
-                this.scheduleReconnect();
-            }
+        console.log('🔌 WebSocket connect() 호출됨');
+        console.log('  - 클라이언트 존재:', !!this.client);
+        console.log('  - 현재 연결 상태:', this.isConnected);
+        console.log('  - 사용자 ID:', this.currentUserId);
+        
+        if (!this.client) {
+            console.error('❌ WebSocket 클라이언트가 null입니다');
+            return;
+        }
+        
+        if (this.isConnected) {
+            console.log('✅ 이미 연결되어 있음, 연결 시도 건너뜀');
+            return;
+        }
+        
+        try {
+            console.log('🚀 WebSocket 연결 시도 중... (URL: ws://localhost:9090/ws?userId=' + this.currentUserId + ')');
+            this.client.activate();
+            console.log('✅ WebSocket activate() 호출 완료');
+        } catch (error) {
+            console.error('❌ WebSocket 연결 실패:', error);
+            this.scheduleReconnect();
         }
     }
 
@@ -179,43 +208,59 @@ export class WebSocketManager {
         this.subscriptions.set('personal', personalSub);
         console.log('✅ 개인 알림 구독 완료: /user/queue/notifications');
 
-        // 매칭 결과 구독
+        // 매칭 결과 구독 - 강화된 로깅 및 오류 처리
         const matchingSub = this.client.subscribe('/user/queue/matching-result', (message: IMessage) => {
             try {
+                console.log('🔥 WebSocket 매칭 결과 RAW 메시지 수신:', message);
+                console.log('🔥 메시지 헤더:', message.headers);
+                console.log('🔥 메시지 바디:', message.body);
+                
                 const data = JSON.parse(message.body);
-                console.log('🔥 WebSocket 매칭 결과 전체 데이터:', data);
-                console.log('📊 데이터 구조 분석:');
+                console.log('🔥 WebSocket 매칭 결과 전체 데이터 (userId:', this.currentUserId + '):', data);
+                console.log('📊 데이터 구조 상세 분석:');
                 console.log('  - data.status:', data.status);
                 console.log('  - data.success:', data.success); 
                 console.log('  - data.type:', data.type);
                 console.log('  - data.matchingResult:', data.matchingResult);
+                console.log('  - data.roomId:', data.roomId);
+                console.log('  - data.matchedUser:', data.matchedUser);
+                console.log('  - data.matchedWith:', data.matchedWith);
                 
                 // status가 "WAITING"이면 대기 상태로 처리하고 즉시 return
                 if (data.status === 'WAITING') {
-                    console.log('⏳ 매칭 대기 상태 - 매칭 성공 처리하지 않음');
+                    console.log('⏳ 매칭 대기 상태 - 매칭 성공 처리하지 않음 (userId:', this.currentUserId + ')');
                     return; // WAITING 상태일 때는 매칭 성공 처리 중단
                 }
                 
-                // 매칭 성공 처리 - Event 기반 데이터 구조 고려
-                if (data.type === 'MATCHING_SUCCESS' || 
+                // 매칭 성공 조건 확장 - 백엔드 이벤트 데이터 구조에 맞춤
+                const isMatchingSuccess = (
+                    data.type === 'MATCHING_SUCCESS' || 
                     (data.success && (data.status === 'MATCHED' || data.status === 'ALREADY_MATCHED')) || 
-                    (data.matchingResult && data.matchingResult.status === 'MATCHED')) {
-                    
-                    console.log('매칭 성공 감지, 이벤트 발생:', data);
+                    (data.matchingResult && data.matchingResult.status === 'MATCHED') ||
+                    (data.roomId && data.matchedWith) || // 백엔드 이벤트 기본 구조
+                    (data.roomId && data.matchedUser) // 대체 구조
+                );
+                
+                if (isMatchingSuccess) {
+                    console.log('🎉 매칭 성공 조건 만족! 이벤트 발생 (userId:', this.currentUserId + '):', data);
                     this.handleMessage({
                         type: 'MATCHING_SUCCESS',
                         data: data,
                         timestamp: new Date().toISOString()
                     });
                 } else if (!data.success && data.status !== 'ALREADY_MATCHED') {
+                    console.log('❌ 매칭 실패 처리 (userId:', this.currentUserId + '):', data);
                     this.handleMessage({
                         type: 'MATCHING_FAILED',
                         data: data,
                         timestamp: new Date().toISOString()
                     });
+                } else {
+                    console.log('❓ 알 수 없는 매칭 결과 데이터 (userId:', this.currentUserId + '):', data);
                 }
             } catch (error) {
-                console.error('매칭 결과 파싱 오류:', error);
+                console.error('매칭 결과 파싱 오류 (userId:', this.currentUserId + '):', error);
+                console.error('원본 메시지:', message);
             }
         });
         this.subscriptions.set('matching', matchingSub);
@@ -365,17 +410,31 @@ export class WebSocketManager {
         });
     }
 
-    // 매칭 요청
+    // 매칭 요청 - 강화된 로깅
     public requestMatching(userId: number): void {
+        console.log('🚀 매칭 요청 시도 (userId:', userId, ', 현재 연결 상태:', this.getConnectionStatus() + ')');
+        
         if (!this.client || !this.isConnected) {
-            console.warn('WebSocket이 연결되지 않았습니다');
+            console.warn('⚠️ WebSocket이 연결되지 않음 - 매칭 요청 실패');
+            console.log('  - 클라이언트:', !!this.client);
+            console.log('  - 연결 상태:', this.isConnected);
+            console.log('  - 구독 상태:', this.subscriptions.size, '개');
             return;
         }
 
-        this.client.publish({
-            destination: '/app/request-matching',
-            body: JSON.stringify({ userId })
-        });
+        try {
+            const payload = { userId };
+            console.log('📤 WebSocket 매칭 요청 전송:', payload);
+            
+            this.client.publish({
+                destination: '/app/request-matching',
+                body: JSON.stringify(payload)
+            });
+            
+            console.log('✅ WebSocket 매칭 요청 전송 완료 (userId:', userId + ')');
+        } catch (error) {
+            console.error('❌ WebSocket 매칭 요청 전송 오류:', error);
+        }
     }
 
     // 음악 공유
