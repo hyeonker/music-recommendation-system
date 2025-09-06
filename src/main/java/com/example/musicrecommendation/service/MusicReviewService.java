@@ -17,7 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +35,7 @@ public class MusicReviewService {
     private final ReviewHelpfulRepository reviewHelpfulRepository;
     private final ReviewReportRepository reviewReportRepository;
     private final UserService userService;
+    private final UserBehaviorTrackingService behaviorTrackingService;
     
     @Transactional
     @CacheEvict(value = {"reviews", "user-names"}, allEntries = true)
@@ -81,6 +84,10 @@ public class MusicReviewService {
         
         // 배지 시스템 체크
         badgeService.checkAndAwardBadges(userId);
+        
+        // 리뷰 작성 행동 추적 (비동기)
+        behaviorTrackingService.trackReviewEvent(userId, externalId, 
+            mapItemType(itemType), rating.doubleValue(), reviewText);
         
         log.info("✅ 새 리뷰 작성 완료 - 사용자: {}, 음악: '{}' (ID: {}), 평점: {}, 리뷰 ID: {}", 
                 userId, musicItem.getName(), musicItem.getId(), rating, savedReview.getId());
@@ -406,5 +413,57 @@ public class MusicReviewService {
      */
     public boolean hasUserReportedReview(Long reviewId, Long userId) {
         return reviewReportRepository.existsByReviewIdAndReporterUserId(reviewId, userId);
+    }
+    
+    /**
+     * MusicItem.MusicItemType을 UserBehaviorEvent.ItemType으로 변환
+     */
+    private UserBehaviorEvent.ItemType mapItemType(MusicItem.MusicItemType musicItemType) {
+        return switch (musicItemType) {
+            case TRACK -> UserBehaviorEvent.ItemType.SONG;
+            case ALBUM -> UserBehaviorEvent.ItemType.ALBUM;
+            case ARTIST -> UserBehaviorEvent.ItemType.ARTIST;
+            case PLAYLIST -> UserBehaviorEvent.ItemType.PLAYLIST;
+        };
+    }
+    
+    /**
+     * 리뷰 기반 추천을 위한 유사 평점 사용자 찾기
+     */
+    public List<Long> findUsersWithSimilarRatingPatterns(Long userId, int limit) {
+        try {
+            List<MusicReview> userReviews = reviewRepository.findByUserId(userId);
+            if (userReviews.isEmpty()) return List.of();
+            
+            // 사용자의 평균 평점 계산
+            double userAvgRating = userReviews.stream()
+                .mapToInt(MusicReview::getRating)
+                .average()
+                .orElse(3.0);
+            
+            // ±0.5 범위의 유사한 평점 패턴을 가진 사용자들 찾기
+            return reviewRepository.findUsersWithSimilarAverageRating(userId, userAvgRating, 0.5, limit);
+            
+        } catch (Exception e) {
+            log.error("유사 평점 패턴 사용자 검색 실패 (userId: {}): {}", userId, e.getMessage());
+            return List.of();
+        }
+    }
+    
+    /**
+     * 특정 아이템에 대한 평점 분포 조회
+     */
+    public Map<Integer, Long> getRatingDistribution(Long musicItemId) {
+        try {
+            List<Object[]> distribution = reviewRepository.findRatingDistributionByMusicItemId(musicItemId);
+            return distribution.stream()
+                .collect(Collectors.toMap(
+                    arr -> ((Number) arr[0]).intValue(),
+                    arr -> ((Number) arr[1]).longValue()
+                ));
+        } catch (Exception e) {
+            log.error("평점 분포 조회 실패 (musicItemId: {}): {}", musicItemId, e.getMessage());
+            return Map.of();
+        }
     }
 }

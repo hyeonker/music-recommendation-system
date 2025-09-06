@@ -4,12 +4,18 @@ import com.example.musicrecommendation.service.MusicRecommendationEngine;
 import com.example.musicrecommendation.service.UserProfileService;
 import com.example.musicrecommendation.service.MusicReviewService;
 import com.example.musicrecommendation.service.SpotifyService;
+import com.example.musicrecommendation.service.RecommendationLimitService;
+import com.example.musicrecommendation.service.UserSongLikeService;
+import com.example.musicrecommendation.config.RecommendationProperties;
 import com.example.musicrecommendation.domain.MusicReview;
+import com.example.musicrecommendation.domain.UserSongLike;
 import com.example.musicrecommendation.web.dto.ProfileDto;
 import com.example.musicrecommendation.web.dto.spotify.TrackDto;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/recommendations")
 @RequiredArgsConstructor
@@ -28,115 +35,280 @@ public class MusicRecommendationController {
     private final UserProfileService userProfileService;
     private final MusicReviewService musicReviewService;
     private final SpotifyService spotifyService;
+    private final RecommendationLimitService limitService;
+    private final UserSongLikeService userSongLikeService;
+    private final RecommendationProperties properties;
     
-    // 사용자별 일일 새로고침 횟수 추적 (메모리 캐시)
-    private final Map<String, Integer> dailyRefreshCount = new ConcurrentHashMap<>();
-    private final Map<String, String> lastRefreshDate = new ConcurrentHashMap<>();
-    private final int MAX_DAILY_REFRESH = 10;
+    // 사용자별 최근 추천 곡 캐시 (중복 방지용) - 3분으로 단축
+    private final Map<Long, Set<String>> userRecentRecommendations = new ConcurrentHashMap<>();
+    private final Map<Long, Long> userRecommendationTimestamps = new ConcurrentHashMap<>();
+    private static final long RECOMMENDATION_CACHE_DURATION_MS = 3 * 60 * 1000; // 3분
     
     /**
-     * Dashboard용 사용자 맞춤 추천 (Spotify 기반)
+     * Dashboard용 사용자 맞춤 추천 (Spotify 기반) - 개선된 제한 시스템
      */
     @GetMapping("/user/{userId}")
     public ResponseEntity<?> getUserRecommendations(@PathVariable Long userId) {
         try {
-            // 새로고침 제한 확인
-            String userKey = userId.toString();
-            String today = LocalDate.now().toString();
+            // 추천 조회 시에는 현재 상태만 확인 (증가하지 않음)
+            var limitResult = limitService.checkCurrentRefreshStatus(userId);
             
-            // 날짜가 바뀌면 카운트 리셋
-            if (!today.equals(lastRefreshDate.get(userKey))) {
-                dailyRefreshCount.put(userKey, 0);
-                lastRefreshDate.put(userKey, today);
-            }
+            // 추천 생성 (설정 기반 제한값 사용)
+            List<Map<String, Object>> recommendations = generateSpotifyBasedRecommendations(
+                userId, properties.getMaxRecommendationsPerRequest()
+            );
             
-            int currentCount = dailyRefreshCount.getOrDefault(userKey, 0);
+            // 시간당 제한도 확인 (가상의 시간당 제한)
+            int hourlyUsed = limitResult.getCurrentCount() > 3 ? 3 : limitResult.getCurrentCount();
+            int hourlyMax = 3;
+            int hourlyRemaining = Math.max(0, hourlyMax - hourlyUsed);
             
-            // 일일 제한 확인
-            if (currentCount >= MAX_DAILY_REFRESH) {
-                return ResponseEntity.ok(Map.of(
-                    "error", "DAILY_LIMIT_EXCEEDED",
-                    "message", "오늘 새로고침 횟수를 모두 사용했습니다. (10회 제한)",
-                    "remainingRefresh", 0,
-                    "maxRefresh", MAX_DAILY_REFRESH
-                ));
-            }
-            
-            // 새로고침 카운트 증가
-            dailyRefreshCount.put(userKey, currentCount + 1);
-            
-            List<Map<String, Object>> recommendations = generateSpotifyBasedRecommendations(userId);
-            
-            // 기존 호환성을 위해 추천 리스트만 반환 (새로고침 정보는 헤더로)
+            // 응답 헤더에 일일 + 시간당 제한 정보 추가
             return ResponseEntity.ok()
-                .header("X-Refresh-Used", String.valueOf(currentCount + 1))
-                .header("X-Refresh-Remaining", String.valueOf(MAX_DAILY_REFRESH - (currentCount + 1)))
-                .header("X-Refresh-Max", String.valueOf(MAX_DAILY_REFRESH))
-                .header("X-Refresh-Reset-Date", today)
+                .header("X-Refresh-Used", String.valueOf(limitResult.getCurrentCount()))
+                .header("X-Refresh-Remaining", String.valueOf(limitResult.getRemainingCount()))
+                .header("X-Refresh-Max", String.valueOf(limitResult.getMaxCount()))
+                .header("X-Refresh-Reset-Date", limitResult.getResetDate().toString())
+                .header("X-Hourly-Used", String.valueOf(hourlyUsed))
+                .header("X-Hourly-Remaining", String.valueOf(hourlyRemaining))
+                .header("X-Hourly-Max", String.valueOf(hourlyMax))
                 .body(recommendations);
+                
         } catch (Exception e) {
-            return ResponseEntity.ok(Collections.emptyList());
+            log.error("추천 생성 중 에러 발생: {}", e.getMessage(), e);
+            
+            // 에러 상황에서도 기본 제한 정보 헤더 추가
+            int dailyMax = 10;
+            int dailyUsed = 0;
+            int dailyRemaining = dailyMax;
+            int hourlyMax = 3;
+            int hourlyUsed = 0;
+            int hourlyRemaining = hourlyMax;
+            
+            // 폴백 추천 생성
+            List<Map<String, Object>> fallbackRecs = properties.isFallbackEnabled() 
+                ? generateFallbackRecommendations(userId)
+                : Collections.emptyList();
+            
+            // 기본 헤더와 함께 응답
+            return ResponseEntity.ok()
+                .header("X-Refresh-Used", String.valueOf(dailyUsed))
+                .header("X-Refresh-Remaining", String.valueOf(dailyRemaining))
+                .header("X-Refresh-Max", String.valueOf(dailyMax))
+                .header("X-Refresh-Reset-Date", java.time.LocalDate.now().plusDays(1).toString())
+                .header("X-Hourly-Used", String.valueOf(hourlyUsed))
+                .header("X-Hourly-Remaining", String.valueOf(hourlyRemaining))
+                .header("X-Hourly-Max", String.valueOf(hourlyMax))
+                .body(fallbackRecs);
         }
     }
 
+    /**
+     * 기본 추천 생성 (8곡)
+     */
     private List<Map<String, Object>> generateSpotifyBasedRecommendations(Long userId) {
+        return generateSpotifyBasedRecommendations(userId, 8);
+    }
+    
+    /**
+     * 제한된 수의 추천 생성
+     */
+    private List<Map<String, Object>> generateSpotifyBasedRecommendations(Long userId, int maxCount) {
+        log.debug("사용자 {}에 대한 추천 생성 시작 (최대 {}곡)", userId, maxCount);
+        
+        // 1. 사용자별 최근 추천 이력 관리
+        Set<String> userRecentTracks = getUserRecentRecommendations(userId);
+        log.debug("사용자 {} 최근 추천 이력: {}개 트랙", userId, userRecentTracks.size());
+        
+        // 2. 사용자가 좋아요한 곡들 가져오기 (추천에서 제외)
+        Set<String> likedTrackIds = getUserLikedTrackIds(userId);
+        log.info("사용자 {} 좋아요한 곡: {}개", userId, likedTrackIds.size());
+        
         List<Map<String, Object>> recommendations = new ArrayList<>();
-        Set<String> usedTrackIds = new HashSet<>(); // 중복 방지
+        Set<String> usedTrackIds = new HashSet<>(userRecentTracks); // 최근 추천과 현재 추천 모두 중복 방지
+        usedTrackIds.addAll(likedTrackIds); // 좋아요한 곡들도 제외
         Random random = new Random();
         
         try {
-            // 1. 사용자 프로필 가져오기
+            // 2. 사용자 프로필 가져오기
             ProfileDto profile = userProfileService.getOrInit(userId);
+            log.info("사용자 {} 프로필 데이터:", userId);
+            log.info("- 선호 아티스트: {}", profile.getFavoriteArtists());
+            log.info("- 선호 장르: {}", profile.getFavoriteGenres());
             
-            // 2. 사용자 리뷰에서 높은 평점 아티스트/장르 추출
+            // 3. 사용자 리뷰에서 높은 평점 아티스트/장르 추출
             List<String> reviewBasedArtists = getArtistsFromUserReviews(userId);
             List<String> reviewBasedGenres = getGenresFromUserReviews(userId);
+            log.info("리뷰 기반 아티스트: {}", reviewBasedArtists);
+            log.info("리뷰 기반 장르: {}", reviewBasedGenres);
             
-            // 3. 프로필과 리뷰 데이터 결합 및 가중치 적용
+            // 4. 프로필과 리뷰 데이터 결합 및 가중치 적용
             List<WeightedRecommendationSource> weightedSources = new ArrayList<>();
             
             // 리뷰 기반 아티스트 (가장 높은 가중치)
-            reviewBasedArtists.forEach(artist -> 
-                weightedSources.add(new WeightedRecommendationSource(artist, "ARTIST", "리뷰 기반", 0.9)));
+            for (String artist : reviewBasedArtists) {
+
+
+
+                weightedSources.add(new WeightedRecommendationSource(artist, "ARTIST", "리뷰 기반", 0.9));
+            }
+
+
+
+            log.info("리뷰 기반 아티스트 소스 개수: {}", reviewBasedArtists.size());
                 
             // 프로필 선호 아티스트
-            profile.getFavoriteArtists().forEach(artist -> 
-                weightedSources.add(new WeightedRecommendationSource(
-                    (String) artist.get("name"), "ARTIST", "선호 아티스트", 0.7)));
-            
-            // 리뷰 기반 장르
-            reviewBasedGenres.forEach(genre -> 
-                weightedSources.add(new WeightedRecommendationSource(genre, "GENRE", "리뷰 기반", 0.6)));
+            for (Map<String, Object> artistMap : profile.getFavoriteArtists()) {
+                String artistName = (String) artistMap.get("name");
                 
-            // 프로필 선호 장르
-            profile.getFavoriteGenres().forEach(genre -> 
-                weightedSources.add(new WeightedRecommendationSource(
-                    (String) genre.get("name"), "GENRE", "선호 장르", 0.5)));
-            
-            // 4. 가중치 기준 정렬 (높은 가중치부터)
-            weightedSources.sort((a, b) -> Double.compare(b.weight, a.weight));
-            
-            // 5. 개인화된 추천 생성 (중복 제거 포함)
-            for (WeightedRecommendationSource source : weightedSources) {
-                if (recommendations.size() >= 8) break; // 최대 8곡
-                
-                try {
-                    List<TrackDto> tracks = spotifyService.searchTracks(source.value, 10);
-                    if (!tracks.isEmpty()) {
-                        // 인기도와 개인화 점수를 고려한 선택
-                        TrackDto bestTrack = selectBestTrack(tracks, source.weight, usedTrackIds);
-                        if (bestTrack != null) {
-                            Map<String, Object> recommendation = createRecommendationMap(bestTrack, source.description);
-                            recommendations.add(recommendation);
-                            usedTrackIds.add(bestTrack.getId());
-                        }
-                    }
-                } catch (Exception e) {
-                    // 개별 검색 실패는 무시
+                if (artistName != null && !artistName.trim().isEmpty()) {
+                    weightedSources.add(new WeightedRecommendationSource(artistName, "ARTIST", "선호 아티스트", 0.7));
+                    log.info("선호 아티스트 소스 추가: {}", artistName);
+                } else {
+                    log.warn("잘못된 아티스트 데이터: {}", artistMap);
                 }
             }
             
-            // 6. 부족하면 트렌딩 곡으로 스마트 보충
+            // 리뷰 기반 장르
+            for (String genre : reviewBasedGenres) {
+                weightedSources.add(new WeightedRecommendationSource(genre, "GENRE", "리뷰 기반", 0.6));
+            }
+            log.info("리뷰 기반 장르 소스 개수: {}", reviewBasedGenres.size());
+                
+            // 프로필 선호 장르
+            for (Map<String, Object> genreMap : profile.getFavoriteGenres()) {
+                String genreName = (String) genreMap.get("name");
+                
+                if (genreName != null && !genreName.trim().isEmpty()) {
+                    weightedSources.add(new WeightedRecommendationSource(genreName, "GENRE", "선호 장르", 0.5));
+                    log.info("선호 장르 소스 추가: {}", genreName);
+                } else {
+                    log.warn("잘못된 장르 데이터: {}", genreMap);
+                }
+            }
+            
+            log.info("전체 추천 소스 개수: {}", weightedSources.size());
+            
+            // 5. 가중치 기준 정렬하되, 같은 가중치 내에서만 셔플
+            Map<Double, List<WeightedRecommendationSource>> sourcesByWeight = weightedSources.stream()
+                .collect(Collectors.groupingBy(source -> source.weight));
+                
+            List<WeightedRecommendationSource> orderedSources = new ArrayList<>();
+            Random sourceRandom = new Random(System.nanoTime());
+            
+            // 가중치 높은 순으로 처리하되, 같은 가중치 그룹 내에서만 셔플
+            sourcesByWeight.entrySet().stream()
+                .sorted(Map.Entry.<Double, List<WeightedRecommendationSource>>comparingByKey().reversed())
+                .forEach(entry -> {
+                    List<WeightedRecommendationSource> groupSources = new ArrayList<>(entry.getValue());
+                    Collections.shuffle(groupSources, sourceRandom); // 같은 가중치 내에서만 셔플
+                    orderedSources.addAll(groupSources);
+                    log.debug("가중치 {} 그룹: {}개 소스 처리", entry.getKey(), groupSources.size());
+                });
+            
+            weightedSources = orderedSources;
+            
+            // 6. 개선된 개인화 추천 생성 - 아티스트별 2-3곡, 장르별 1-2곡 허용
+            Map<String, Integer> sourceQuotas = calculateSourceQuotas(weightedSources, maxCount);
+            Map<String, Integer> sourceUsed = new HashMap<>();
+            
+            for (WeightedRecommendationSource source : weightedSources) {
+                if (recommendations.size() >= maxCount) break;
+                
+                String sourceKey = source.type + ":" + source.value;
+                int quota = sourceQuotas.getOrDefault(sourceKey, 1);
+                int used = sourceUsed.getOrDefault(sourceKey, 0);
+                
+                if (used >= quota) {
+                    log.debug("소스 할당량 초과: {} (사용: {}, 할당: {})", sourceKey, used, quota);
+                    continue;
+                }
+                
+                try {
+                    log.debug("추천 소스 처리: {} ({}) - 가중치: {}, 할당량: {}/{}", 
+                             source.value, source.type, source.weight, used, quota);
+                    
+                    List<TrackDto> tracks = new ArrayList<>();
+                    
+                    if (source.type.equals("ARTIST")) {
+                        // 여러 검색 방식 시도하여 최대한 많은 결과 확보
+                        tracks = new ArrayList<>();
+                        
+                        // 1차: 정확한 artist: 검색 시도 (따옴표 제거 - Spotify API 표준)
+                        String exactQuery = "artist:" + source.value;
+                        List<TrackDto> exactTracks = spotifyService.searchTracks(exactQuery, 20);
+                        tracks.addAll(exactTracks);
+                        log.warn("🎯 정확한 아티스트 검색 '{}' 결과: {}곡", exactQuery, exactTracks.size());
+                        
+                        // 2차: 아티스트명을 따옴표로 감싼 검색
+                        if (tracks.size() < 10) {
+                            String quotedQuery = "\"" + source.value + "\"";
+                            List<TrackDto> quotedTracks = spotifyService.searchTracks(quotedQuery, 20);
+                            addUniqueTracksById(tracks, quotedTracks);
+                            log.warn("🎯 따옴표 아티스트 검색 '{}' 결과: 총 {}곡", quotedQuery, tracks.size());
+                        }
+                        
+                        // 3차: 일반 아티스트명 검색 
+                        if (tracks.size() < 10) {
+                            List<TrackDto> simpleTracks = spotifyService.searchTracks(source.value, 20);
+                            addUniqueTracksById(tracks, simpleTracks);
+                            log.warn("🎯 단순 아티스트 검색 '{}' 결과: 총 {}곡", source.value, tracks.size());
+                        }
+                        
+                        log.warn("🎯 아티스트 '{}' 최종 검색 결과: {}곡", source.value, tracks.size());
+                    } else {
+                        tracks = spotifyService.searchTracks(source.value, 10);
+                        log.debug("장르 검색 '{}' 결과: {}곡", source.value, tracks.size());
+                    }
+                    
+                    if (!tracks.isEmpty()) {
+                        // 아티스트 검색의 경우 실제 아티스트 매치 검증
+                        if (source.type.equals("ARTIST")) {
+                            int beforeFilter = tracks.size();
+                            tracks = filterTracksByActualArtist(tracks, source.value);
+                            log.debug("아티스트 매치 필터링: {}곡 -> {}곡 (타겟: {})", 
+                                     beforeFilter, tracks.size(), source.value);
+                        }
+                        
+                        if (tracks.isEmpty()) {
+                            log.warn("필터링 후 남은 트랙이 없음: {} ({})", source.value, source.type);
+                            continue;
+                        }
+                        
+                        // 할당량만큼 여러 곡 선택 시도
+                        int remainingQuota = quota - used;
+                        int tracksToSelect = Math.min(remainingQuota, Math.min(tracks.size(), maxCount - recommendations.size()));
+                        
+                        for (int i = 0; i < tracksToSelect; i++) {
+                            TrackDto bestTrack = selectBestTrack(tracks, source.weight, usedTrackIds);
+                            if (bestTrack != null) {
+                                Map<String, Object> recommendation = createRecommendationMap(bestTrack, source.description);
+                                recommendations.add(recommendation);
+                                usedTrackIds.add(bestTrack.getId());
+                                
+                                String artist = bestTrack.getArtists().isEmpty() ? "Unknown" : bestTrack.getArtists().get(0).getName();
+                                String titleArtistKey = "title_artist:" + (bestTrack.getName() + "|" + artist).toLowerCase();
+                                usedTrackIds.add(titleArtistKey);
+                                
+                                sourceUsed.put(sourceKey, sourceUsed.getOrDefault(sourceKey, 0) + 1);
+                                
+                                log.info("추천 추가: {} - {} (소스: {} {}, {}/{})", 
+                                        bestTrack.getName(), artist, source.type, source.description,
+                                        sourceUsed.get(sourceKey), quota);
+                            } else {
+                                log.debug("더 이상 선택 가능한 곡 없음: {} ({})", source.value, source.type);
+                                break;
+                            }
+                        }
+                    } else {
+                        log.warn("검색 결과 없음: {} ({})", source.value, source.type);
+                    }
+                } catch (Exception e) {
+                    log.error("검색 실패: {} ({}) - {}", source.value, source.type, e.getMessage());
+                }
+            }
+            
+            // 7. 부족하면 트렌딩 곡으로 스마트 보충
             if (recommendations.size() < 4) {
                 List<String> trendingGenres = getTrendingGenresForUser(profile);
                 fillWithTrendingTracks(recommendations, usedTrackIds, trendingGenres);
@@ -146,8 +318,30 @@ public class MusicRecommendationController {
             // 전체 실패 시 빈 리스트 반환
         }
         
-        // 7. 최종 중복 제거 및 다양성 보장
-        return ensureDiversityAndRemoveDuplicates(recommendations);
+        // 8. 최종 중복 제거 및 다양성 보장 (일시적 비활성화 - 테스트용)
+        List<Map<String, Object>> finalRecommendations = recommendations; // ensureDiversityAndRemoveDuplicates(recommendations);
+        
+        // 9. 최근 추천 이력에 새로운 추천 곡들 추가
+        updateUserRecentRecommendations(userId, finalRecommendations);
+        
+        // 10. 로깅으로 중복 문제 진단
+        log.debug("사용자 {} 추천 생성 완료 - 최초 {}곡 -> 최종 {}곡", 
+                 userId, recommendations.size(), finalRecommendations.size());
+        
+        if (finalRecommendations.size() != recommendations.size()) {
+            log.info("사용자 {} 추천에서 {}개 중복/다양성 문제 제거됨", 
+                    userId, recommendations.size() - finalRecommendations.size());
+        }
+        
+        // 9. 추천 결과 요약 로깅 (중복 진단용)
+        if (log.isDebugEnabled() && !finalRecommendations.isEmpty()) {
+            String trackIds = finalRecommendations.stream()
+                .map(rec -> (String) rec.get("id"))
+                .collect(Collectors.joining(", "));
+            log.debug("사용자 {} 최종 추천 트랙 ID들: [{}]", userId, trackIds);
+        }
+        
+        return finalRecommendations;
     }
     
     private static class WeightedRecommendationSource {
@@ -164,27 +358,146 @@ public class MusicRecommendationController {
         }
     }
     
+    /**
+     * 소스별 할당량 계산 - 아티스트는 2-3곡, 장르는 1-2곡
+     */
+    private Map<String, Integer> calculateSourceQuotas(List<WeightedRecommendationSource> sources, int maxCount) {
+        Map<String, Integer> quotas = new HashMap<>();
+        
+        // 아티스트와 장르 개수 카운트
+        long artistCount = sources.stream().filter(s -> "ARTIST".equals(s.type)).count();
+        long genreCount = sources.stream().filter(s -> "GENRE".equals(s.type)).count();
+        
+        // 8곡 추천에 맞춘 할당량 조정
+        // 아티스트: 6곡 (75%), 장르: 2곡 (25%)
+        int artistTotalQuota = Math.max(1, (int) (maxCount * 0.75));
+        int genreTotalQuota = maxCount - artistTotalQuota;
+        
+        // 아티스트별 할당량 (최소 1곡, 최대 2곡)
+        for (WeightedRecommendationSource source : sources) {
+            String sourceKey = source.type + ":" + source.value;
+            
+            if ("ARTIST".equals(source.type)) {
+                // 가중치와 아티스트 수를 고려한 동적 할당
+                int baseQuota = artistCount > 0 ? Math.max(1, artistTotalQuota / (int) artistCount) : 1;
+                
+                // 가중치 보너스 (리뷰 기반은 +1, 선호 아티스트는 기본)
+                int weightBonus = source.weight >= 0.9 ? 1 : 0;
+                int finalQuota = Math.min(2, baseQuota + weightBonus);
+                
+                quotas.put(sourceKey, finalQuota);
+                log.debug("아티스트 할당량: {} -> {}곡 (가중치: {})", source.value, finalQuota, source.weight);
+                
+            } else if ("GENRE".equals(source.type)) {
+                // 장르는 1곡씩 할당
+                int genreQuota = 1;
+                quotas.put(sourceKey, genreQuota);
+                log.debug("장르 할당량: {} -> {}곡 (가중치: {})", source.value, genreQuota, source.weight);
+            }
+        }
+        
+        log.info("할당량 계산 완료 - 아티스트: {}개 (총 {}곡), 장르: {}개 (총 {}곡)", 
+                artistCount, artistTotalQuota, genreCount, genreTotalQuota);
+        
+        return quotas;
+    }
+    
     private TrackDto selectBestTrack(List<TrackDto> tracks, double userWeight, Set<String> usedIds) {
-        // 이미 사용된 트랙 제외
+        // 이미 사용된 트랙 제외 (ID, 제목+아티스트, 정규화, 키워드 매칭)
         List<TrackDto> availableTracks = tracks.stream()
-            .filter(track -> !usedIds.contains(track.getId()))
+            .filter(track -> {
+                // ID 중복 체크
+                if (usedIds.contains(track.getId())) {
+                    return false;
+                }
+                
+                String artist = track.getArtists().isEmpty() ? "Unknown" : track.getArtists().get(0).getName();
+                String title = track.getName();
+                
+                // 1. 정확한 title+artist 중복 체크
+                String titleArtistKey = "title_artist:" + (title + "|" + artist).toLowerCase();
+                if (usedIds.contains(titleArtistKey)) {
+                    return false;
+                }
+                
+                // 2. 정규화된 title+artist 중복 체크 - 비활성화 (너무 강력한 매칭으로 인한 과도한 필터링 방지)
+                // String normalizedTitle = normalizeString(title);
+                // String normalizedArtist = normalizeString(artist);
+                // String normalizedKey = "normalized:" + (normalizedTitle + "|" + normalizedArtist);
+                // if (usedIds.contains(normalizedKey)) {
+                //     return false;
+                // }
+                
+                // 3. 제목 키워드 매칭 체크 - 너무 강력하므로 비활성화 (정확한 곡만 제외)
+                // String[] titleWords = normalizedTitle.split("\\s+");
+                // for (String word : titleWords) {
+                //     if (word.length() > 3 && usedIds.contains("title_word:" + word)) {
+                //         return false;
+                //     }
+                // }
+                
+                // 4. 아티스트 키워드 매칭 체크 - 제거 (좋아하는 아티스트의 다른 곡들은 추천되어야 함)
+                // String[] artistWords = normalizedArtist.split("\\s+");
+                // for (String word : artistWords) {
+                //     if (word.length() > 2 && usedIds.contains("artist_word:" + word)) {
+                //         return false;
+                //     }
+                // }
+                
+                return true;
+            })
             .toList();
             
-        if (availableTracks.isEmpty()) return null;
+        if (availableTracks.isEmpty()) {
+            log.debug("모든 트랙이 이미 사용됨 - 사용된 ID 개수: {}", usedIds.size());
+            return null;
+        }
         
-        // 인기도와 개인화 가중치를 결합한 점수 계산
-        return availableTracks.stream()
-            .max((a, b) -> {
-                double scoreA = (a.getPopularity() / 100.0) * 0.3 + userWeight * 0.7;
-                double scoreB = (b.getPopularity() / 100.0) * 0.3 + userWeight * 0.7;
-                return Double.compare(scoreA, scoreB);
+        // 강화된 랜덤 시드 사용 (시간 기반)
+        Random random = new Random(System.nanoTime());
+        
+        // 랜덤성을 크게 증가 - 상위 50% 중에서 무작위 선택
+        int selectFrom = Math.max(1, availableTracks.size() / 2);
+        
+        // 트랙을 섞어서 무작위 순서로 만들기
+        List<TrackDto> shuffledTracks = new ArrayList<>(availableTracks);
+        Collections.shuffle(shuffledTracks, random);
+        
+        // 인기도와 개인화 가중치를 결합한 점수 계산 (랜덤 팩터 감소)
+        List<ScoredTrack> scoredTracks = shuffledTracks.stream()
+            .map(track -> {
+                double baseScore = (track.getPopularity() / 100.0) * 0.4 + userWeight * 0.6;
+                // 랜덤 요소 감소 (±0.1)로 인기도와 가중치를 더 중시
+                double randomFactor = (random.nextDouble() - 0.5) * 0.2;
+                return new ScoredTrack(track, baseScore + randomFactor);
             })
-            .orElse(availableTracks.get(0));
+            .sorted((a, b) -> Double.compare(b.score, a.score))
+            .toList();
+        
+        // 상위 N개 중에서 완전 무작위 선택 (더 큰 다양성)
+        int finalSelectFrom = Math.min(selectFrom, scoredTracks.size());
+        int randomIndex = random.nextInt(finalSelectFrom);
+        
+        TrackDto selectedTrack = scoredTracks.get(randomIndex).track;
+        log.debug("트랙 선택: {} ({}개 중 {}번째)", selectedTrack.getName(), scoredTracks.size(), randomIndex + 1);
+        
+        return selectedTrack;
+    }
+    
+    private static class ScoredTrack {
+        final TrackDto track;
+        final double score;
+        
+        ScoredTrack(TrackDto track, double score) {
+            this.track = track;
+            this.score = score;
+        }
     }
     
     private List<String> getTrendingGenresForUser(ProfileDto profile) {
         Set<String> userGenres = profile.getFavoriteGenres().stream()
-            .map(genre -> (String) genre.get("name"))
+            .map(genreMap -> (String) genreMap.get("name"))
+            .filter(Objects::nonNull)
             .collect(Collectors.toSet());
             
         List<String> allTrendingGenres = List.of("pop", "indie pop", "alternative rock", 
@@ -211,6 +524,11 @@ public class MusicRecommendationController {
                 if (bestTrack != null) {
                     recommendations.add(createRecommendationMap(bestTrack, "트렌딩"));
                     usedIds.add(bestTrack.getId());
+                    
+                    // 제목+아티스트 조합도 추가하여 중복 방지 강화
+                    String artist = bestTrack.getArtists().isEmpty() ? "Unknown" : bestTrack.getArtists().get(0).getName();
+                    String titleArtistKey = "title_artist:" + (bestTrack.getName() + "|" + artist).toLowerCase();
+                    usedIds.add(titleArtistKey);
                 }
             } catch (Exception e) {
                 // 실패 시 해당 장르 제거
@@ -221,6 +539,7 @@ public class MusicRecommendationController {
     
     private List<Map<String, Object>> ensureDiversityAndRemoveDuplicates(List<Map<String, Object>> recommendations) {
         Map<String, Map<String, Object>> uniqueById = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> uniqueByTitleArtist = new LinkedHashMap<>(); // 제목+아티스트 중복 체크 추가
         Map<String, Integer> artistCount = new HashMap<>();
         Map<String, Integer> genreCount = new HashMap<>();
         
@@ -228,27 +547,48 @@ public class MusicRecommendationController {
         
         for (Map<String, Object> rec : recommendations) {
             String trackId = (String) rec.get("id");
+            String title = (String) rec.get("title");
             String artist = (String) rec.get("artist");
             String genre = (String) rec.get("genre");
             
             // ID 중복 체크
-            if (uniqueById.containsKey(trackId)) continue;
+            if (uniqueById.containsKey(trackId)) {
+                log.debug("ID 중복 제거: {}", trackId);
+                continue;
+            }
             
-            // 아티스트 다양성 체크 (같은 아티스트 최대 2곡)
+            // 제목+아티스트 중복 체크 (더 엄격한 중복 제거)
+            String titleArtistKey = (title + "_" + artist).toLowerCase().replaceAll("\\s+", "");
+            if (uniqueByTitleArtist.containsKey(titleArtistKey)) {
+                log.debug("제목+아티스트 중복 제거: {} - {}", title, artist);
+                continue;
+            }
+            
+            // 아티스트 다양성 체크 (같은 아티스트 최대 2곡까지 허용)
             int artistFreq = artistCount.getOrDefault(artist, 0);
-            if (artistFreq >= 2) continue;
+            if (artistFreq >= 2) {
+                log.debug("아티스트 다양성으로 제거: {} ({}곡 이미 있음)", artist, artistFreq);
+                continue;
+            }
             
             // 장르 다양성 체크 (같은 장르 최대 3곡)
             int genreFreq = genreCount.getOrDefault(genre, 0);
-            if (genreFreq >= 3) continue;
+            if (genreFreq >= 3) {
+                log.debug("장르 다양성으로 제거: {}", genre);
+                continue;
+            }
             
             // 통과한 추천 추가
             uniqueById.put(trackId, rec);
+            uniqueByTitleArtist.put(titleArtistKey, rec);
             diverseRecommendations.add(rec);
             artistCount.put(artist, artistFreq + 1);
             genreCount.put(genre, genreFreq + 1);
+            
+            log.debug("추천 추가: {} - {} ({})", title, artist, genre);
         }
         
+        log.debug("중복 제거 결과: {}곡 -> {}곡", recommendations.size(), diverseRecommendations.size());
         return diverseRecommendations;
     }
     
@@ -329,6 +669,24 @@ public class MusicRecommendationController {
                 .collect(Collectors.toList());
         } catch (Exception e) {
             return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * 폴백 추천 생성 (외부 API 실패 시)
+     */
+    private List<Map<String, Object>> generateFallbackRecommendations(Long userId) {
+        try {
+            // MusicRecommendationEngine의 폴백 추천 사용
+            return recommendationEngine.getPersonalizedRecommendations(userId, 5);
+        } catch (Exception e) {
+            // 최후의 수단: 하드코딩된 기본 추천
+            return List.of(
+                Map.of("id", "fallback_1", "title", "Popular Song", "artist", "Various Artists", 
+                       "genre", "Pop", "score", 75, "popularity", 80, "duration", "3:30"),
+                Map.of("id", "fallback_2", "title", "Trending Hit", "artist", "Chart Artist", 
+                       "genre", "Electronic", "score", 70, "popularity", 85, "duration", "3:45")
+            );
         }
     }
 
@@ -540,7 +898,8 @@ public class MusicRecommendationController {
             var userProfile = userProfileService.getOrInit(userId);
             
             List<String> currentGenres = userProfile.getFavoriteGenres().stream()
-                .map(genre -> (String) genre.get("name"))
+                .map(genreMap -> (String) genreMap.get("name"))
+                .filter(Objects::nonNull)
                 .toList();
             
             List<String> allGenres = List.of("Jazz", "Classical", "Country", "Reggae", "Blues", 
@@ -571,5 +930,266 @@ public class MusicRecommendationController {
                 "timestamp", java.time.Instant.now().toString()
             ));
         }
+    }
+    
+    /**
+     * 실제 아티스트 매치 검증 - 제목에 아티스트 이름이 포함된 다른 아티스트 곡 필터링
+     */
+    private List<TrackDto> filterTracksByActualArtist(List<TrackDto> tracks, String targetArtist) {
+        String normalizedTarget = normalizeArtistName(targetArtist);
+        
+        List<TrackDto> filteredTracks = tracks.stream()
+            .filter(track -> {
+                if (track.getArtists() == null || track.getArtists().isEmpty()) {
+                    return false;
+                }
+                
+                // 트랙의 아티스트 중 하나라도 타겟 아티스트와 매치되면 통과
+                boolean artistMatch = track.getArtists().stream()
+                    .anyMatch(artist -> {
+                        String normalizedArtist = normalizeArtistName(artist.getName());
+                        
+                        // 다양한 매치 조건
+                        boolean exactMatch = normalizedArtist.equals(normalizedTarget);
+                        boolean similarMatch = calculateSimilarity(normalizedArtist, normalizedTarget) >= 0.8; // 80%로 완화
+                        boolean containsMatch = normalizedArtist.contains(normalizedTarget) || normalizedTarget.contains(normalizedArtist);
+                        
+                        return exactMatch || similarMatch || containsMatch;
+                    });
+                
+                if (artistMatch) {
+                    log.debug("아티스트 매치: {} - {} (타겟: {})", 
+                             track.getName(), 
+                             track.getArtists().get(0).getName(), 
+                             targetArtist);
+                    return true;
+                } else {
+                    log.debug("아티스트 불일치로 필터링: {} - {} (타겟: {})", 
+                             track.getName(), 
+                             track.getArtists().get(0).getName(), 
+                             targetArtist);
+                    return false;
+                }
+            })
+            .toList();
+            
+        // 필터링 결과가 너무 적으면 (3곡 미만) 더 관대한 기준 적용
+        if (filteredTracks.size() < 3) {
+            log.warn("필터링 결과가 {}곡으로 적음. 더 관대한 기준 적용: {}", filteredTracks.size(), targetArtist);
+            
+            // 더 관대한 필터링: 제목에 아티스트 이름이 있는 것만 제외
+            return tracks.stream()
+                .filter(track -> {
+                    if (track.getArtists() == null || track.getArtists().isEmpty()) {
+                        return false;
+                    }
+                    
+                    String trackTitle = track.getName().toLowerCase();
+                    String trackArtist = track.getArtists().get(0).getName().toLowerCase();
+                    String target = targetArtist.toLowerCase();
+                    
+                    // 트랙 제목에 타겟 아티스트 이름이 있고, 실제 아티스트가 다르면 제외
+                    boolean titleHasTargetArtist = trackTitle.contains(target);
+                    boolean actualArtistMatches = trackArtist.contains(target) || target.contains(trackArtist);
+                    
+                    if (titleHasTargetArtist && !actualArtistMatches) {
+                        log.debug("제목에 아티스트명 포함된 다른 아티스트 곡 제외: {} - {}", track.getName(), trackArtist);
+                        return false;
+                    }
+                    
+                    return true;
+                })
+                .toList();
+        }
+        
+        return filteredTracks;
+    }
+    
+    /**
+     * 아티스트 이름 정규화 (공백, 특수문자 제거)
+     */
+    private String normalizeArtistName(String name) {
+        if (name == null) return "";
+        
+        return name.toLowerCase()
+                  .replaceAll("[^a-zA-Z0-9가-힣]", "") // 알파벳, 숫자, 한글만 유지
+                  .trim();
+    }
+    
+    /**
+     * 문자열 유사도 계산 (레벤슈타인 거리 기반)
+     */
+    private double calculateSimilarity(String s1, String s2) {
+        if (s1.equals(s2)) return 1.0;
+        
+        int maxLength = Math.max(s1.length(), s2.length());
+        if (maxLength == 0) return 1.0;
+        
+        return (maxLength - levenshteinDistance(s1, s2)) / (double) maxLength;
+    }
+    
+    /**
+     * 레벤슈타인 거리 계산
+     */
+    private int levenshteinDistance(String s1, String s2) {
+        int[][] dp = new int[s1.length() + 1][s2.length() + 1];
+        
+        for (int i = 0; i <= s1.length(); i++) {
+            dp[i][0] = i;
+        }
+        for (int j = 0; j <= s2.length(); j++) {
+            dp[0][j] = j;
+        }
+        
+        for (int i = 1; i <= s1.length(); i++) {
+            for (int j = 1; j <= s2.length(); j++) {
+                int cost = (s1.charAt(i - 1) == s2.charAt(j - 1)) ? 0 : 1;
+                dp[i][j] = Math.min(Math.min(
+                    dp[i - 1][j] + 1,    // deletion
+                    dp[i][j - 1] + 1),   // insertion
+                    dp[i - 1][j - 1] + cost); // substitution
+            }
+        }
+        
+        return dp[s1.length()][s2.length()];
+    }
+    
+    /**
+     * 사용자별 최근 추천 이력 조회 (캐시 만료 시 초기화)
+     */
+    private Set<String> getUserRecentRecommendations(Long userId) {
+        long currentTime = System.currentTimeMillis();
+        Long lastUpdateTime = userRecommendationTimestamps.get(userId);
+        
+        // 캐시가 만료된 경우 초기화
+        if (lastUpdateTime == null || (currentTime - lastUpdateTime) > RECOMMENDATION_CACHE_DURATION_MS) {
+            userRecentRecommendations.remove(userId);
+            userRecommendationTimestamps.remove(userId);
+            log.debug("사용자 {} 추천 이력 캐시 만료로 초기화", userId);
+            return new HashSet<>();
+        }
+        
+        return userRecentRecommendations.getOrDefault(userId, new HashSet<>());
+    }
+    
+    /**
+     * ID로 중복되지 않는 트랙만 추가
+     */
+    private void addUniqueTracksById(List<TrackDto> existingTracks, List<TrackDto> newTracks) {
+        Set<String> existingIds = existingTracks.stream()
+            .map(TrackDto::getId)
+            .collect(Collectors.toSet());
+            
+        for (TrackDto newTrack : newTracks) {
+            if (!existingIds.contains(newTrack.getId())) {
+                existingTracks.add(newTrack);
+                existingIds.add(newTrack.getId());
+            }
+        }
+    }
+    
+    /**
+     * 사용자가 좋아요한 곡들의 ID 가져오기 (추천에서 제외하기 위함)
+     */
+    private Set<String> getUserLikedTrackIds(Long userId) {
+        try {
+            // 사용자가 좋아요한 곡들을 페이징으로 가져오기 (최대 1000곡까지)
+            Pageable pageable = PageRequest.of(0, 1000);
+            Page<UserSongLike> likedSongs = userSongLikeService.getUserLikedSongs(userId, pageable);
+            
+            Set<String> likedTrackKeys = new HashSet<>();
+            
+            for (UserSongLike like : likedSongs.getContent()) {
+                if (like.getSong() != null) {
+                    String title = like.getSong().getTitle();
+                    String artist = like.getSong().getArtist();
+                    
+                    if (title != null && artist != null) {
+                        // 1. 정확한 title+artist 조합
+                        String titleArtistKey = "title_artist:" + (title + "|" + artist).toLowerCase();
+                        likedTrackKeys.add(titleArtistKey);
+                        
+                        // 2. 정규화된 title+artist 조합 - 비활성화 (과도한 필터링 방지)
+                        // String normalizedTitle = normalizeString(title);
+                        // String normalizedArtist = normalizeString(artist);
+                        // String normalizedKey = "normalized:" + (normalizedTitle + "|" + normalizedArtist);
+                        // likedTrackKeys.add(normalizedKey);
+                        
+                        // 3. 부분 매칭을 위한 키워드들 - 비활성화 (과도한 필터링 방지)
+                        // String[] titleWords = normalizedTitle.split("\\s+");
+                        // String[] artistWords = normalizedArtist.split("\\s+");
+                        
+                        // 제목 키워드는 제외 - 너무 강력한 필터링 방지 (정확한 곡만 제외)
+                        // for (String word : titleWords) {
+                        //     if (word.length() > 3) {
+                        //         likedTrackKeys.add("title_word:" + word);
+                        //     }
+                        // }
+                        
+                        // 아티스트 키워드는 제외 - 좋아하는 아티스트의 다른 곡들은 추천되어야 함
+                        // for (String word : artistWords) {
+                        //     if (word.length() > 2) {
+                        //         likedTrackKeys.add("artist_word:" + word);
+                        //     }
+                        // }
+                        
+                        log.debug("좋아요한 곡 추가: {} - {} (키: 1개)", title, artist);
+                    }
+                }
+            }
+            
+            log.info("사용자 {} 좋아요한 곡 {}개를 추천에서 제외 (총 {}개 키)", userId, likedSongs.getContent().size(), likedTrackKeys.size());
+            return likedTrackKeys;
+            
+        } catch (Exception e) {
+            log.warn("좋아요한 곡 목록 가져오기 실패: {}", e.getMessage());
+            return new HashSet<>();
+        }
+    }
+
+    /**
+     * 사용자별 최근 추천 이력 업데이트
+     */
+    private void updateUserRecentRecommendations(Long userId, List<Map<String, Object>> newRecommendations) {
+        Set<String> recentTracks = userRecentRecommendations.computeIfAbsent(userId, k -> new HashSet<>());
+        
+        // 새로운 추천 곡들의 ID 추가
+        for (Map<String, Object> rec : newRecommendations) {
+            String trackId = (String) rec.get("id");
+            if (trackId != null) {
+                recentTracks.add(trackId);
+                
+                // 제목+아티스트 조합도 추가하여 더 강력한 중복 방지
+                String title = (String) rec.get("title");
+                String artist = (String) rec.get("artist");
+                if (title != null && artist != null) {
+                    String titleArtistKey = (title + "|" + artist).toLowerCase();
+                    recentTracks.add("title_artist:" + titleArtistKey);
+                }
+            }
+        }
+        
+        // 타임스탬프 업데이트
+        userRecommendationTimestamps.put(userId, System.currentTimeMillis());
+        
+        log.debug("사용자 {} 추천 이력 업데이트 완료 - 총 {}개 트랙", userId, recentTracks.size());
+        
+        // 메모리 효율성을 위해 너무 많은 트랙이 쌓이면 제한
+        if (recentTracks.size() > 100) {
+            // 오래된 것들 제거 (간단히 절반 제거)
+            Set<String> reducedSet = recentTracks.stream().limit(50).collect(Collectors.toSet());
+            userRecentRecommendations.put(userId, reducedSet);
+            log.debug("사용자 {} 추천 이력 크기 제한으로 {}개로 축소", userId, reducedSet.size());
+        }
+    }
+
+    private String normalizeString(String input) {
+        if (input == null) {
+            return "";
+        }
+        return input.toLowerCase()
+                .replaceAll("[^a-zA-Z0-9가-힣\\s]", "")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }

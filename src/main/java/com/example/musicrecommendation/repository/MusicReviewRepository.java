@@ -79,4 +79,28 @@ public interface MusicReviewRepository extends JpaRepository<MusicReview, Long> 
            "ORDER BY r.rating DESC, r.created_at DESC", 
            nativeQuery = true)
     List<MusicReview> findReviewsForRecommendations(@Param("userId") Long userId, @Param("minRating") Integer minRating);
+    
+    /**
+     * 유사한 평점 패턴을 가진 사용자들 찾기
+     */
+    @Query(value = "SELECT DISTINCT r.user_id FROM music_reviews r " +
+           "WHERE r.user_id != :userId AND r.is_public = true " +
+           "GROUP BY r.user_id " +
+           "HAVING ABS(AVG(r.rating::numeric) - :avgRating) <= :tolerance " +
+           "ORDER BY ABS(AVG(r.rating::numeric) - :avgRating) " +
+           "LIMIT :limit", 
+           nativeQuery = true)
+    List<Long> findUsersWithSimilarAverageRating(@Param("userId") Long userId, 
+                                                @Param("avgRating") Double avgRating,
+                                                @Param("tolerance") Double tolerance,
+                                                @Param("limit") Integer limit);
+    
+    /**
+     * 특정 아이템에 대한 평점 분포 조회
+     */
+    @Query(value = "SELECT r.rating, COUNT(*) as count FROM music_reviews r " +
+           "WHERE r.music_item_id = :musicItemId AND r.is_public = true " +
+           "GROUP BY r.rating ORDER BY r.rating", 
+           nativeQuery = true)
+    List<Object[]> findRatingDistributionByMusicItemId(@Param("musicItemId") Long musicItemId);
 }

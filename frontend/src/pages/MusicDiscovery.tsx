@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Heart, Play, Music, Loader, Star, Clock } from 'lucide-react';
+import { Search, Heart, Play, Music, Loader, Star } from 'lucide-react';
 import api from '../api/client';
 import { validateMusicSearch } from '../utils/security';
 
@@ -15,7 +15,7 @@ interface SpotifyTrack {
     external_urls: {
         spotify: string;
     };
-    duration_ms: number;
+    // duration_ms: number; // 청취 기능 없으므로 제거
     popularity: number;
 }
 
@@ -27,7 +27,7 @@ interface SearchResult {
     image: string;
     previewUrl: string | null;
     spotifyUrl: string;
-    duration: number;
+    // duration: number; // 청취 기능 없으므로 제거
     popularity: number;
     isLiked?: boolean;
 }
@@ -38,8 +38,6 @@ const MusicDiscovery: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [likedTracks, setLikedTracks] = useState<Set<string>>(new Set());
-    const [currentPreview, setCurrentPreview] = useState<string | null>(null);
-    const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
 
     const loadUserLikes = async () => {
         try {
@@ -122,7 +120,7 @@ const MusicDiscovery: React.FC = () => {
                     image: track.album.images[0]?.url || '',
                     previewUrl: track.preview_url,
                     spotifyUrl: track.external_urls.spotify,
-                    duration: track.duration_ms,
+                    // duration: track.duration_ms, // 청취 기능 없으므로 제거
                     popularity: track.popularity
                 }));
                 setSearchResults(results);
@@ -143,12 +141,6 @@ const MusicDiscovery: React.FC = () => {
         window.open(youtubeSearchUrl, '_blank');
     };
 
-    const formatDuration = (ms: number): string => {
-        const minutes = Math.floor(ms / 60000);
-        const seconds = Math.floor((ms % 60000) / 1000);
-        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    };
-
     const handleKeyPress = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             searchMusic();
@@ -158,14 +150,6 @@ const MusicDiscovery: React.FC = () => {
     useEffect(() => {
         loadUserLikes();
     }, []);
-
-    useEffect(() => {
-        return () => {
-            if (audioElement) {
-                audioElement.pause();
-            }
-        };
-    }, [audioElement]);
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
@@ -269,11 +253,7 @@ const MusicDiscovery: React.FC = () => {
                                     {track.album}
                                 </p>
 
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-2">
-                                        <Clock className="w-4 h-4 text-gray-400" />
-                                        <span className="text-gray-400 text-sm">{formatDuration(track.duration)}</span>
-                                    </div>
+                                <div className="flex items-center justify-end">
                                     <div className="flex space-x-2">
                                         <button
                                             onClick={() => {

@@ -1,5 +1,6 @@
 package com.example.musicrecommendation.web.dto.spotify;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.List;
 
 public class TrackDto {
@@ -31,6 +32,7 @@ public class TrackDto {
     public Integer getPopularity() { return popularity; }
     public void setPopularity(Integer popularity) { this.popularity = popularity; }
 
+    @JsonIgnore
     public Integer getDurationMs() { return durationMs; }
     public void setDurationMs(Integer durationMs) { this.durationMs = durationMs; }
 

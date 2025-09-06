@@ -152,7 +152,7 @@ public class SpotifyController {
         spotifyTrack.put("id", track.getId());
         spotifyTrack.put("name", track.getName());
         spotifyTrack.put("popularity", track.getPopularity());
-        spotifyTrack.put("duration_ms", track.getDurationMs());
+        // spotifyTrack.put("duration_ms", track.getDurationMs()); // 타이머 표시 제거
         spotifyTrack.put("preview_url", track.getPreviewUrl());
         
         // artists 배열

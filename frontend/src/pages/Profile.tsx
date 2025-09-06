@@ -1125,7 +1125,7 @@ const Profile: React.FC = () => {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {likedSongs.slice(0, 9).map((like, index) => (
+                            {likedSongs.map((like, index) => (
                                 <div
                                     key={like.id || index}
                                     className="bg-white/10 rounded-lg p-4 hover:bg-white/20 transition-colors group"
@@ -1173,13 +1173,6 @@ const Profile: React.FC = () => {
                         </div>
                     )}
 
-                    {likedSongs.length > 9 && (
-                        <div className="text-center mt-4">
-                            <p className="text-blue-200 text-sm">
-                                +{likedSongs.length - 9}개의 음악을 더 좋아요했어요
-                            </p>
-                        </div>
-                    )}
                 </div>
 
                 {/* 프로필 요약 */}

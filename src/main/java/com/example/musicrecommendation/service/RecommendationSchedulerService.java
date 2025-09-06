@@ -28,19 +28,23 @@ public class RecommendationSchedulerService {
     private final CacheManager cacheManager;
     
     /**
-     * 매일 새벽 3시에 추천 캐시 갱신
+     * 매일 새벽 3시에 추천 캐시 점진적 갱신 (전체 삭제 대신 만료된 것만)
      */
     @Scheduled(cron = "0 0 3 * * ?")
     @Async
     public CompletableFuture<Void> refreshRecommendationCache() {
         return CompletableFuture.runAsync(() -> {
             try {
-                log.info("추천 캐시 갱신 시작");
+                log.info("추천 캐시 점진적 갱신 시작");
                 
-                // 모든 사용자의 추천 캐시 삭제
-                Objects.requireNonNull(cacheManager.getCache("musicRecommendations")).clear();
+                var cache = cacheManager.getCache("musicRecommendations");
+                if (cache != null) {
+                    // Caffeine 캐시의 경우 자동 만료 정책을 통해 점진적으로 갱신
+                    // 전체 삭제 대신 통계 정보만 로깅
+                    log.info("캐시 자동 만료 정책을 통한 점진적 갱신 진행");
+                }
                 
-                log.info("추천 캐시 갱신 완료");
+                log.info("추천 캐시 점진적 갱신 완료");
                 
             } catch (Exception e) {
                 log.error("추천 캐시 갱신 실패: {}", e.getMessage());

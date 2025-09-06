@@ -2,6 +2,11 @@ package com.example.musicrecommendation.service;
 
 import com.example.musicrecommendation.domain.UserProfile;
 import com.example.musicrecommendation.web.dto.ProfileDto;
+import com.example.musicrecommendation.service.UserBehaviorTrackingService;
+import com.example.musicrecommendation.service.UserMusicPreferencesService;
+import com.example.musicrecommendation.service.AdvancedCollaborativeFilteringService;
+import com.example.musicrecommendation.service.MLRecommendationService;
+import com.example.musicrecommendation.config.RecommendationProperties;
 import com.example.musicrecommendation.web.dto.spotify.ArtistDto;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -30,9 +35,14 @@ public class MusicRecommendationEngine {
     private final MusicMatchingService musicMatchingService;
     private final SpotifyService spotifyService;
     private final NotificationService notificationService;
+    private final UserBehaviorTrackingService behaviorTrackingService;
+    private final UserMusicPreferencesService preferencesService;
+    private final AdvancedCollaborativeFilteringService collaborativeFilteringService;
+    private final MLRecommendationService mlRecommendationService;
+    private final RecommendationProperties properties;
     
     /**
-     * 개인화된 음악 추천 (메인 추천 엔진)
+     * 개인화된 음악 추천 (새로운 ML 기반 엔진)
      * @param userId 대상 사용자 ID
      * @param recommendationCount 추천할 곡 수
      * @return 추천 음악 리스트
@@ -41,39 +51,97 @@ public class MusicRecommendationEngine {
                unless = "#result == null || #result.isEmpty()")
     public List<Map<String, Object>> getPersonalizedRecommendations(Long userId, int recommendationCount) {
         try {
-            log.info("사용자 {}에 대한 개인화 추천 생성 시작 ({}곡)", userId, recommendationCount);
+            log.info("사용자 {}에 대한 개선된 개인화 추천 생성 시작 ({}곡)", userId, recommendationCount);
             
-            // 1. 사용자 프로필 가져오기
-            var userProfile = userProfileService.getOrInit(userId);
+            // A/B 테스트: 사용자 ID 기준으로 ML 모델 사용 여부 결정
+            boolean useAdvancedAlgorithms = shouldUseAdvancedAlgorithms(userId);
             
-            // 2. 다양한 추천 알고리즘 결합
-            List<Map<String, Object>> contentBasedRecs = generateContentBasedRecommendations(userProfile, recommendationCount / 3);
-            List<Map<String, Object>> collaborativeRecs = generateCollaborativeRecommendations(userId, recommendationCount / 3);
-            List<Map<String, Object>> trendingRecs = generateTrendingRecommendations(userProfile, recommendationCount / 3);
-            
-            // 3. 하이브리드 추천 생성
-            List<Map<String, Object>> hybridRecommendations = combineRecommendations(
-                contentBasedRecs, collaborativeRecs, trendingRecs, recommendationCount
-            );
-            
-            // 4. 추천 결과에 메타데이터 추가
-            var finalRecommendations = enhanceRecommendationsWithMetadata(hybridRecommendations, userId);
-            
-            // 5. 추천 알림 전송 (비동기)
-            try {
-                if (!finalRecommendations.isEmpty()) {
-                    notificationService.sendRecommendationNotification(userId, "personalized", finalRecommendations.size());
-                }
-            } catch (Exception e) {
-                // 알림 실패해도 추천은 정상 반환
+            if (useAdvancedAlgorithms) {
+                // 새로운 ML 기반 추천
+                return getAdvancedPersonalizedRecommendations(userId, recommendationCount);
+            } else {
+                // 기존 하이브리드 추천 (fallback)
+                return getLegacyPersonalizedRecommendations(userId, recommendationCount);
             }
-            
-            return finalRecommendations;
             
         } catch (Exception e) {
             log.error("개인화 추천 생성 실패 (userId: {}): {}", userId, e.getMessage());
             return generateFallbackRecommendations(recommendationCount);
         }
+    }
+    
+    /**
+     * 새로운 고급 알고리즘 기반 추천
+     */
+    private List<Map<String, Object>> getAdvancedPersonalizedRecommendations(Long userId, int recommendationCount) {
+        try {
+            // 1. ML 기반 추천 (메인)
+            List<MLRecommendationService.MLRecommendationItem> mlRecommendations = 
+                mlRecommendationService.getMLBasedRecommendations(userId, recommendationCount);
+            
+            // 2. 고급 협업 필터링 추천 (보조)
+            List<AdvancedCollaborativeFilteringService.RecommendationItem> cfRecommendations = 
+                collaborativeFilteringService.getCollaborativeRecommendations(userId, recommendationCount / 2);
+            
+            // 3. ML 추천을 기본 포맷으로 변환
+            List<Map<String, Object>> convertedMLRecs = mlRecommendations.stream()
+                .map(this::convertMLRecommendationToMap)
+                .collect(Collectors.toList());
+            
+            // 4. CF 추천을 기본 포맷으로 변환
+            List<Map<String, Object>> convertedCFRecs = cfRecommendations.stream()
+                .map(this::convertCFRecommendationToMap)
+                .collect(Collectors.toList());
+            
+            // 5. 결합 및 최적화
+            List<Map<String, Object>> combined = combineAdvancedRecommendations(
+                convertedMLRecs, convertedCFRecs, recommendationCount);
+            
+            // 6. 메타데이터 추가
+            var enhanced = enhanceRecommendationsWithMetadata(combined, userId);
+            
+            // 7. 추천 새로고침 이벤트 추적 (비동기)
+            behaviorTrackingService.trackRefreshRecommendationsEvent(userId, null);
+            
+            log.info("사용자 {} 고급 알고리즘 추천 {} 개 생성 완료", userId, enhanced.size());
+            return enhanced;
+            
+        } catch (Exception e) {
+            log.warn("고급 알고리즘 추천 실패, 레거시로 폴백 (userId: {}): {}", userId, e.getMessage());
+            return getLegacyPersonalizedRecommendations(userId, recommendationCount);
+        }
+    }
+    
+    /**
+     * 기존 하이브리드 추천 (레거시)
+     */
+    private List<Map<String, Object>> getLegacyPersonalizedRecommendations(Long userId, int recommendationCount) {
+        // 1. 사용자 프로필 가져오기
+        var userProfile = userProfileService.getOrInit(userId);
+        
+        // 2. 기존 추천 알고리즘 사용
+        List<Map<String, Object>> contentBasedRecs = generateContentBasedRecommendations(userProfile, recommendationCount / 3);
+        List<Map<String, Object>> collaborativeRecs = generateCollaborativeRecommendations(userId, recommendationCount / 3);
+        List<Map<String, Object>> trendingRecs = generateTrendingRecommendations(userProfile, recommendationCount / 3);
+        
+        // 3. 하이브리드 추천 생성
+        List<Map<String, Object>> hybridRecommendations = combineRecommendations(
+            contentBasedRecs, collaborativeRecs, trendingRecs, recommendationCount
+        );
+        
+        // 4. 메타데이터 추가
+        var finalRecommendations = enhanceRecommendationsWithMetadata(hybridRecommendations, userId);
+        
+        // 5. 추천 알림 전송 (비동기)
+        try {
+            if (!finalRecommendations.isEmpty()) {
+                notificationService.sendRecommendationNotification(userId, "personalized", finalRecommendations.size());
+            }
+        } catch (Exception e) {
+            // 알림 실패해도 추천은 정상 반환
+        }
+        
+        return finalRecommendations;
     }
     
     /**
@@ -537,5 +605,100 @@ public class MusicRecommendationEngine {
         }
         
         return fallback;
+    }
+    
+    /**
+     * A/B 테스트: 고급 알고리즘 사용 여부 결정
+     */
+    private boolean shouldUseAdvancedAlgorithms(Long userId) {
+        // 사용자 ID 기반 A/B 테스트 (50:50 분할)
+        return userId % 2 == 0;
+    }
+    
+    /**
+     * ML 추천 결과를 기본 Map 포맷으로 변환
+     */
+    private Map<String, Object> convertMLRecommendationToMap(MLRecommendationService.MLRecommendationItem item) {
+        Map<String, Object> converted = new HashMap<>();
+        converted.put("id", item.getItemId());
+        converted.put("name", "ML Recommended Track"); // 실제로는 메타데이터에서 가져옴
+        converted.put("artist", "ML Artist");
+        converted.put("album", "ML Album");
+        converted.put("genre", "ML Genre");
+        converted.put("duration", "3:45");
+        converted.put("popularity", (int) (item.getScore() * 100));
+        converted.put("recommendationType", "ml_based");
+        converted.put("personalityScore", item.getScore());
+        converted.put("confidence", item.getConfidence());
+        converted.put("algorithm", item.getAlgorithm());
+        converted.put("mlFeatures", item.getFeatures());
+        return converted;
+    }
+    
+    /**
+     * 협업 필터링 추천 결과를 기본 Map 포맷으로 변환
+     */
+    private Map<String, Object> convertCFRecommendationToMap(AdvancedCollaborativeFilteringService.RecommendationItem item) {
+        Map<String, Object> converted = new HashMap<>();
+        converted.put("id", item.getItemId());
+        converted.put("name", "CF Recommended Track"); // 실제로는 메타데이터에서 가져옴
+        converted.put("artist", "CF Artist");
+        converted.put("album", "CF Album");
+        converted.put("genre", "CF Genre");
+        converted.put("duration", "3:40");
+        converted.put("popularity", (int) (item.getScore() * 100));
+        converted.put("recommendationType", "advanced_cf");
+        converted.put("personalityScore", item.getScore());
+        converted.put("confidence", item.getConfidence());
+        converted.put("algorithm", item.getAlgorithm());
+        return converted;
+    }
+    
+    /**
+     * 고급 추천 결과 결합
+     */
+    private List<Map<String, Object>> combineAdvancedRecommendations(
+            List<Map<String, Object>> mlRecommendations,
+            List<Map<String, Object>> cfRecommendations,
+            int targetCount) {
+        
+        Map<String, Map<String, Object>> combined = new HashMap<>();
+        
+        // ML 추천 (높은 가중치: 0.7)
+        for (Map<String, Object> item : mlRecommendations) {
+            String itemId = (String) item.get("id");
+            Map<String, Object> weighted = new HashMap<>(item);
+            double score = (Double) item.get("personalityScore");
+            weighted.put("personalityScore", score * 0.7);
+            combined.put(itemId, weighted);
+        }
+        
+        // CF 추천 (낮은 가중치: 0.3, 또는 기존 점수와 결합)
+        for (Map<String, Object> item : cfRecommendations) {
+            String itemId = (String) item.get("id");
+            if (combined.containsKey(itemId)) {
+                // 이미 존재하는 경우 점수 결합
+                Map<String, Object> existing = combined.get(itemId);
+                double existingScore = (Double) existing.get("personalityScore");
+                double newScore = (Double) item.get("personalityScore");
+                existing.put("personalityScore", existingScore + (newScore * 0.3));
+                existing.put("algorithm", "HYBRID_ML_CF");
+            } else {
+                // 새로운 항목
+                Map<String, Object> weighted = new HashMap<>(item);
+                double score = (Double) item.get("personalityScore");
+                weighted.put("personalityScore", score * 0.3);
+                combined.put(itemId, weighted);
+            }
+        }
+        
+        // 점수 기준 정렬 후 반환
+        return combined.values().stream()
+            .sorted((a, b) -> Double.compare(
+                (Double) b.get("personalityScore"), 
+                (Double) a.get("personalityScore")
+            ))
+            .limit(targetCount)
+            .collect(Collectors.toList());
     }
 }

@@ -100,6 +100,17 @@ public class SecurityConfig {
         cors.setAllowedHeaders(List.of("*"));
         cors.setAllowCredentials(true);
         cors.setMaxAge(3600L);
+        
+        // 🔧 커스텀 헤더 노출 설정 - 새로고침 제한 정보용
+        cors.setExposedHeaders(Arrays.asList(
+            "X-Refresh-Used", 
+            "X-Refresh-Remaining", 
+            "X-Refresh-Max", 
+            "X-Refresh-Reset-Date",
+            "X-Hourly-Used",
+            "X-Hourly-Remaining", 
+            "X-Hourly-Max"
+        ));
 
         UrlBasedCorsConfigurationSource src = new UrlBasedCorsConfigurationSource();
         src.registerCorsConfiguration("/**", cors);

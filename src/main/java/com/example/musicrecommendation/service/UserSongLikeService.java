@@ -61,6 +61,61 @@ public class UserSongLikeService {
     }
 
     /**
+     * 외부 음악 서비스 곡에 대한 좋아요 토글
+     * Song이 존재하지 않으면 자동으로 생성
+     * @return ToggleResult with boolean liked and Long actualSongId
+     */
+    @Transactional
+    public ToggleResult toggleExternalSong(Long userId, Long songId, String title, String artist, String imageUrl) {
+        // 사용자 존재 여부 확인
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다: " + userId));
+
+        // Song 찾기 또는 생성 (제목+아티스트 기반)
+        Song song = songRepository.findByTitleAndArtist(title, artist)
+                .orElseGet(() -> {
+                    // 존재하지 않으면 새로 생성
+                    Song newSong = new Song(title, artist, imageUrl);
+                    return songRepository.save(newSong);
+                });
+
+        // 기존 좋아요 확인 (실제 Song ID 사용)
+        Optional<UserSongLike> existingLike = userSongLikeRepository.findByUserIdAndSongId(userId, song.getId());
+
+        if (existingLike.isPresent()) {
+            // 이미 좋아요 → 취소
+            userSongLikeRepository.delete(existingLike.get());
+            return new ToggleResult(false, song.getId());
+        } else {
+            // 좋아요 추가
+            UserSongLike newLike = new UserSongLike(user, song);
+            userSongLikeRepository.save(newLike);
+            return new ToggleResult(true, song.getId());
+        }
+    }
+    
+    /**
+     * 외부 음악 좋아요 토글 결과
+     */
+    public static class ToggleResult {
+        private final boolean liked;
+        private final Long actualSongId;
+        
+        public ToggleResult(boolean liked, Long actualSongId) {
+            this.liked = liked;
+            this.actualSongId = actualSongId;
+        }
+        
+        public boolean isLiked() {
+            return liked;
+        }
+        
+        public Long getActualSongId() {
+            return actualSongId;
+        }
+    }
+
+    /**
      * 사용자가 좋아요한 곡 목록 조회 (페이징)
      *
      * @param userId 사용자 ID

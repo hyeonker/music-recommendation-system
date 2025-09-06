@@ -13,6 +13,15 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOrigins("http://localhost:3000")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .allowCredentials(true);
+                .allowCredentials(true)
+                .exposedHeaders(
+                    "X-Refresh-Used", 
+                    "X-Refresh-Remaining", 
+                    "X-Refresh-Max", 
+                    "X-Refresh-Reset-Date",
+                    "X-Hourly-Used",
+                    "X-Hourly-Remaining", 
+                    "X-Hourly-Max"
+                );
     }
 }

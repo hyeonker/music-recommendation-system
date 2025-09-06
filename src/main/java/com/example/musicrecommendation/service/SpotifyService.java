@@ -366,8 +366,8 @@ public class SpotifyService {
 
             HttpEntity<String> entity = new HttpEntity<>(headers);
 
-            log.debug("Spotify 트랙 검색 호출: q='{}', limit={}", query, limit);
-            log.info("🔗 실제 요청 URL: {}", url);
+            log.warn("🔗 Spotify 트랙 검색 호출: q='{}', limit={}", query, limit);
+            log.warn("🔗 실제 요청 URL: {}", url);
 
             ResponseEntity<SpotifySearchResponse> response = restTemplate.exchange(
                     url, HttpMethod.GET, entity, SpotifySearchResponse.class
@@ -598,8 +598,11 @@ public class SpotifyService {
         String normalizedQuery = normalizeTitle(query).toLowerCase();
         String[] queryWords = normalizedQuery.split("\\s+");
         
+        // 아티스트 기반 검색인지 확인 (artist:"artist_name" 패턴)
+        boolean isArtistSearch = query.toLowerCase().startsWith("artist:");
+        
         return results.stream()
-            .map(track -> new TrackWithScore(track, calculateRelevanceScore(track, normalizedQuery, queryWords)))
+            .map(track -> new TrackWithScore(track, calculateRelevanceScore(track, normalizedQuery, queryWords, isArtistSearch)))
             .filter(trackWithScore -> trackWithScore.score > 0) // 점수가 0인 결과 제외
             .sorted((a, b) -> {
                 // 1차: 점수 높은 순
@@ -618,8 +621,56 @@ public class SpotifyService {
     /**
      * 트랙과 검색어의 관련성 점수 계산 (엄격한 매칭)
      */
-    private double calculateRelevanceScore(TrackDto track, String normalizedQuery, String[] queryWords) {
+    private double calculateRelevanceScore(TrackDto track, String normalizedQuery, String[] queryWords, boolean isArtistSearch) {
         double score = 0.0;
+        
+        // 아티스트 기반 검색의 경우 실제 아티스트 일치 여부 확인
+        if (isArtistSearch) {
+            // artist:"Radiohead" 쿼리에서 아티스트명 추출
+            String targetArtist = normalizedQuery.replaceAll("^artist:\\s*[\"']?([^\"']+)[\"']?$", "$1").trim();
+            
+            log.warn("🎯 아티스트 검색 필터링: 대상 아티스트='{}', 트랙='{}'", targetArtist, track.getName());
+            
+            // 트랙의 아티스트 목록에서 대상 아티스트 검색
+            boolean artistMatches = false;
+            if (track.getArtists() != null) {
+                for (ArtistDto artist : track.getArtists()) {
+                    if (artist.getName() != null) {
+                        String trackArtistName = artist.getName().toLowerCase();
+                        log.warn("  - 트랙 아티스트: '{}' vs 대상: '{}'", trackArtistName, targetArtist);
+                        
+                        if (trackArtistName.contains(targetArtist.toLowerCase()) || 
+                            targetArtist.toLowerCase().contains(trackArtistName)) {
+                            artistMatches = true;
+                            log.warn("  ✅ 아티스트 매칭됨!");
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // 아티스트가 매칭되지 않으면 0점 (제외)
+            if (!artistMatches) {
+                log.warn("  ❌ 아티스트 불일치, 제외");
+                return 0.0;
+            }
+            
+            // 매칭된 경우 점수 계산
+            score += track.getPopularity() != null ? track.getPopularity() * 10.0 : 500.0;
+            
+            // 정규 버전 보너스
+            String originalTitle = track.getName().toLowerCase();
+            if (!originalTitle.contains("live") && 
+                !originalTitle.contains("remix") && 
+                !originalTitle.contains("remaster") &&
+                !originalTitle.contains("acoustic") &&
+                !originalTitle.contains("demo")) {
+                score += 1000.0;
+            }
+            
+            log.warn("  🎉 최종 점수: {}", score);
+            return Math.max(score, 100.0); // 최소 100점 보장
+        }
         
         String trackTitle = normalizeTitle(track.getName()).toLowerCase();
         String originalTrackTitle = track.getName().toLowerCase();

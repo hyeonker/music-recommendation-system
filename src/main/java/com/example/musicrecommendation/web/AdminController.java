@@ -3,6 +3,7 @@ package com.example.musicrecommendation.web;
 import com.example.musicrecommendation.domain.ReviewReport;
 import com.example.musicrecommendation.domain.User;
 import com.example.musicrecommendation.repository.ReviewReportRepository;
+import com.example.musicrecommendation.service.RecommendationLimitService;
 import com.example.musicrecommendation.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,7 @@ public class AdminController {
 
     private final ReviewReportRepository reviewReportRepository;
     private final UserService userService;
+    private final RecommendationLimitService recommendationLimitService;
 
     /**
      * 관리자 권한 확인 - 보안 강화 버전
@@ -219,6 +221,39 @@ public class AdminController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                 "success", false,
                 "message", "신고 상태 업데이트 중 오류가 발생했습니다."
+            ));
+        }
+    }
+
+    /**
+     * 사용자 일일 새로고침 제한 리셋 (관리자용)
+     */
+    @PostMapping("/reset-daily-limit/{userId}")
+    public ResponseEntity<?> resetUserDailyLimit(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
+        
+        if (!isAdmin(oauth2User)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "success", false,
+                "message", "관리자 권한이 필요합니다."
+            ));
+        }
+        
+        try {
+            recommendationLimitService.resetUserDailyLimit(userId);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "사용자 " + userId + "의 일일 제한이 리셋되었습니다.",
+                "userId", userId
+            ));
+            
+        } catch (Exception e) {
+            log.error("일일 제한 리셋 중 오류: ", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "success", false,
+                "message", "일일 제한 리셋 중 오류가 발생했습니다."
             ));
         }
     }

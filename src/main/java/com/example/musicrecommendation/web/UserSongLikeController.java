@@ -1,12 +1,19 @@
 package com.example.musicrecommendation.web;
 
+import com.example.musicrecommendation.domain.AuthProvider;
+import com.example.musicrecommendation.domain.User;
+import com.example.musicrecommendation.domain.UserBehaviorEvent;
+import com.example.musicrecommendation.domain.UserRepository;
 import com.example.musicrecommendation.domain.UserSongLike;
 import com.example.musicrecommendation.domain.UserSongLikeRepository;
+import com.example.musicrecommendation.service.UserBehaviorTrackingService;
+import com.example.musicrecommendation.service.UserService;
 import com.example.musicrecommendation.service.UserSongLikeService;
 import com.example.musicrecommendation.web.dto.LikeResponse;
 import com.example.musicrecommendation.web.dto.LikeToggleResponse;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.Operation;
+import lombok.extern.slf4j.Slf4j;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -15,6 +22,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,15 +32,22 @@ import java.util.stream.Collectors;
 /**
  * 사용자 음악 좋아요 관련 REST API를 제공하는 컨트롤러
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/likes")
 @Tag(name = "좋아요 API", description = "사용자 음악 좋아요 관리 API")
 public class UserSongLikeController {
 
     private final UserSongLikeService userSongLikeService;
+    private final UserRepository userRepository;
+    private final UserBehaviorTrackingService behaviorTrackingService;
 
-    public UserSongLikeController(UserSongLikeService userSongLikeService) {
+    public UserSongLikeController(UserSongLikeService userSongLikeService,
+                                  UserRepository userRepository,
+                                  UserBehaviorTrackingService behaviorTrackingService) {
         this.userSongLikeService = userSongLikeService;
+        this.userRepository = userRepository;
+        this.behaviorTrackingService = behaviorTrackingService;
     }
 
     /**
@@ -77,8 +93,8 @@ public class UserSongLikeController {
             @PathVariable Long userId,
             @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
             @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "페이지 크기", example = "20")
-            @RequestParam(defaultValue = "20") int size) {
+            @Parameter(description = "페이지 크기", example = "100")
+            @RequestParam(defaultValue = "100") int size) {
 
         try {
             Pageable pageable = PageRequest.of(page, size);
@@ -207,31 +223,59 @@ public class UserSongLikeController {
             @ApiResponse(responseCode = "400", description = "잘못된 요청")
     })
     public ResponseEntity<LikeToggleResponse> likeExternalSong(
-            @RequestBody ExternalSongLikeRequest request) {
+            @RequestBody ExternalSongLikeRequest request,
+            @AuthenticationPrincipal OAuth2User oauth2User) {
 
         try {
-            // TODO: 실제 인증된 사용자 ID 사용
-            throw new IllegalStateException("사용자 인증이 구현되지 않았습니다");
+            log.debug("외부 음악 좋아요 요청 받음: songId={}, title={}", request.getSongId(), request.getTitle());
             
-            /*
-            boolean liked = userSongLikeService.likeExternalSong(
+            if (oauth2User == null) {
+                log.warn("인증되지 않은 사용자의 좋아요 요청");
+                return ResponseEntity.status(401).build(); // Unauthorized
+            }
 
-                    userId,
-                    request.getSongId(),
-                    request.getTitle(),
-                    request.getArtist(),
-                    request.getImageUrl()
+            Long userId = getCurrentUserId(oauth2User);
+            log.debug("인증된 사용자 ID: {}", userId);
+            
+            // Spotify ID를 해시코드로 변환하여 Long ID 생성
+            Long songIdAsLong = (long) Math.abs(request.getSongId().hashCode());
+            
+            // 외부 음악 좋아요 토글 (Song이 없으면 자동 생성)
+            UserSongLikeService.ToggleResult result = userSongLikeService.toggleExternalSong(
+                userId, 
+                songIdAsLong, 
+                request.getTitle(), 
+                request.getArtist(), 
+                request.getImageUrl()
             );
             
-            // songId를 Long으로 파싱 (Spotify ID를 해시코드로 변환)
-            Long songIdAsLong = (long) request.getSongId().hashCode();
-            long totalLikes = userSongLikeService.getSongLikeCount(songIdAsLong);
+            // 실제 생성된 Song ID로 좋아요 수 조회
+            long totalLikes = userSongLikeService.getSongLikeCount(result.getActualSongId());
 
-            LikeToggleResponse response = new LikeToggleResponse(userId, songIdAsLong, liked, totalLikes);
-            */
-            // return ResponseEntity.ok(response);
+            // 행동 추적 (좋아요인 경우만)
+            if (result.isLiked()) {
+                java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+                metadata.put("title", request.getTitle());
+                metadata.put("artist", request.getArtist());
+                if (request.getAlbum() != null) {
+                    metadata.put("album", request.getAlbum());
+                }
+                
+                behaviorTrackingService.trackLikeEvent(
+                    userId,
+                    request.getSongId(),
+                    UserBehaviorEvent.ItemType.SONG,
+                    metadata,
+                    true // isLike
+                );
+            }
+
+            LikeToggleResponse response = new LikeToggleResponse(userId, result.getActualSongId(), result.isLiked(), totalLikes);
+            log.debug("좋아요 처리 완료: userId={}, actualSongId={}, liked={}", userId, result.getActualSongId(), result.isLiked());
+            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
+            log.error("외부 음악 좋아요 처리 중 오류 발생", e);
             return ResponseEntity.badRequest().build();
         }
     }
@@ -325,5 +369,51 @@ public class UserSongLikeController {
         
         public String getSpotifyUrl() { return spotifyUrl; }
         public void setSpotifyUrl(String spotifyUrl) { this.spotifyUrl = spotifyUrl; }
+    }
+
+    /**
+     * OAuth2User에서 사용자 ID 추출
+     */
+    private Long getCurrentUserId(OAuth2User oauth2User) {
+        if (oauth2User == null) {
+            throw new IllegalArgumentException("인증되지 않은 사용자입니다.");
+        }
+
+        java.util.Map<String, Object> attrs = oauth2User.getAttributes();
+        log.debug("OAuth2 사용자 속성: {}", attrs.keySet());
+        
+        String provider;
+        String providerId;
+
+        // Google OAuth2의 경우
+        if (attrs.containsKey("email") && attrs.containsKey("sub")) {
+            provider = "google";
+            providerId = attrs.get("sub").toString();
+        }
+        // Kakao OAuth2의 경우
+        else if (attrs.containsKey("id")) {
+            provider = "kakao";
+            providerId = attrs.get("id").toString();
+        }
+        // Naver OAuth2의 경우
+        else if (attrs.containsKey("response")) {
+            provider = "naver";
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> response = (java.util.Map<String, Object>) attrs.get("response");
+            providerId = response.get("id").toString();
+        }
+        // 기타 제공자
+        else {
+            throw new IllegalArgumentException("지원하지 않는 OAuth2 제공자입니다.");
+        }
+
+        // 데이터베이스에서 사용자 조회
+        AuthProvider authProvider = AuthProvider.valueOf(provider.toUpperCase());
+        java.util.Optional<User> userOpt = userRepository.findByProviderAndProviderId(authProvider, providerId);
+        if (userOpt.isEmpty()) {
+            throw new IllegalArgumentException("사용자를 찾을 수 없습니다.");
+        }
+
+        return userOpt.get().getId();
     }
 }

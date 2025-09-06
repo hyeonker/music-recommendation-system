@@ -34,7 +34,7 @@ interface RefreshState {
     nextAllowed: number;
 }
 
-const REFRESH_LIMITS: RefreshLimits = {
+const DEFAULT_REFRESH_LIMITS: RefreshLimits = {
     daily: 10,
     hourly: 3,
     cooldown: 30
@@ -45,40 +45,8 @@ const STORAGE_KEYS = {
     CACHED_RECS: 'music_recommendations_cache'
 };
 
-const FALLBACK_RECS: Recommendation[] = [
-    {
-        id: 1,
-        title: 'Spring Day',
-        artist: 'BTS',
-        image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-        genre: 'K-Pop',
-        score: 95,
-    },
-    {
-        id: 2,
-        title: 'Blinding Lights',
-        artist: 'The Weeknd',
-        image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=300&h=300&fit=crop',
-        genre: 'Pop',
-        score: 89,
-    },
-    {
-        id: 3,
-        title: 'Good 4 U',
-        artist: 'Olivia Rodrigo',
-        image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=300&h=300&fit=crop',
-        genre: 'Pop Rock',
-        score: 87,
-    },
-    {
-        id: 4,
-        title: 'Levitating',
-        artist: 'Dua Lipa',
-        image: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=300&h=300&fit=crop',
-        genre: 'Dance Pop',
-        score: 92,
-    },
-];
+// 더미 데이터 제거 - 실제 추천 시스템 사용
+const FALLBACK_RECS: Recommendation[] = [];
 
 const Dashboard: React.FC = () => {
     const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -86,9 +54,21 @@ const Dashboard: React.FC = () => {
     const [systemStatus, setSystemStatus] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [likedTracks, setLikedTracks] = useState<Set<string | number>>(new Set());
-    const [refreshState, setRefreshState] = useState<RefreshState>({ dailyCount: 0, hourlyCount: 0, lastRefresh: 0, nextAllowed: 0 });
     const [refreshLoading, setRefreshLoading] = useState(false);
     const [showRefreshStatus, setShowRefreshStatus] = useState(false);
+    const [refreshLimits, setRefreshLimits] = useState<{
+        daily: {
+            used: number;
+            remaining: number;
+            max: number;
+        };
+        hourly: {
+            used: number;
+            remaining: number;
+            max: number;
+        };
+        resetDate: string;
+    } | null>(null);
 
     const imageFallback = (e: React.SyntheticEvent<HTMLImageElement>, text: string) => {
         const img = e.currentTarget;
@@ -153,65 +133,15 @@ const Dashboard: React.FC = () => {
         }
     };
 
-    // 새로고침 상태 관리
-    const initializeRefreshState = () => {
-        const stored = localStorage.getItem(STORAGE_KEYS.REFRESH_STATE);
-        if (stored) {
-            try {
-                const parsed: RefreshState = JSON.parse(stored);
-                const now = Date.now();
-                const today = new Date().toDateString();
-                const storedDate = new Date(parsed.lastRefresh).toDateString();
-                const currentHour = new Date().getHours();
-                const storedHour = new Date(parsed.lastRefresh).getHours();
-                
-                // 날짜가 바뀌면 일일 카운트 리셋
-                if (today !== storedDate) {
-                    parsed.dailyCount = 0;
-                }
-                
-                // 시간이 바뀌면 시간당 카운트 리셋
-                if (currentHour !== storedHour) {
-                    parsed.hourlyCount = 0;
-                }
-                
-                setRefreshState(parsed);
-                return parsed;
-            } catch {
-                // 파싱 실패시 초기값 반환
+
+    const canRefresh = (): boolean => {
+        // 서버에서 제한 관리하므로 프론트엔드에서는 남은 횟수 기반으로만 판단
+        if (refreshLimits) {
+            if (refreshLimits.daily.remaining <= 0 || refreshLimits.hourly.remaining <= 0) {
+                return false;
             }
         }
-        
-        const initial: RefreshState = { dailyCount: 0, hourlyCount: 0, lastRefresh: 0, nextAllowed: 0 };
-        setRefreshState(initial);
-        return initial;
-    };
-
-    const updateRefreshState = (newState: RefreshState) => {
-        setRefreshState(newState);
-        localStorage.setItem(STORAGE_KEYS.REFRESH_STATE, JSON.stringify(newState));
-    };
-
-    const canRefresh = (state: RefreshState): { allowed: boolean; reason?: string; waitTime?: number } => {
-        const now = Date.now();
-        
-        // 쿨다운 체크
-        if (now < state.nextAllowed) {
-            const waitSeconds = Math.ceil((state.nextAllowed - now) / 1000);
-            return { allowed: false, reason: 'cooldown', waitTime: waitSeconds };
-        }
-        
-        // 일일 제한 체크
-        if (state.dailyCount >= REFRESH_LIMITS.daily) {
-            return { allowed: false, reason: 'daily_limit' };
-        }
-        
-        // 시간당 제한 체크
-        if (state.hourlyCount >= REFRESH_LIMITS.hourly) {
-            return { allowed: false, reason: 'hourly_limit' };
-        }
-        
-        return { allowed: true };
+        return true;
     };
 
     // 캐시된 추천 음악 로드 (새로고침 시에는 무시)
@@ -278,6 +208,48 @@ const Dashboard: React.FC = () => {
             const loadBatch = async (offset: number, limit: number) => {
                 try {
                     const rec = await api.get(`/api/recommendations/user/${userId}?offset=${offset}&limit=${limit}`);
+                    
+                    // 서버 응답 헤더에서 새로고침 제한 정보 추출 (일일 + 시간당)
+                    console.log('🔍 API 응답 헤더 디버깅:', rec.headers);
+                    if (rec.headers) {
+                        const dailyUsed = rec.headers['x-refresh-used'];
+                        const dailyRemaining = rec.headers['x-refresh-remaining'];
+                        const dailyMax = rec.headers['x-refresh-max'];
+                        const hourlyUsed = rec.headers['x-hourly-used'];
+                        const hourlyRemaining = rec.headers['x-hourly-remaining'];
+                        const hourlyMax = rec.headers['x-hourly-max'];
+                        const resetDate = rec.headers['x-refresh-reset-date'];
+                        
+                        console.log('📊 헤더값들:', {
+                            dailyUsed, dailyRemaining, dailyMax,
+                            hourlyUsed, hourlyRemaining, hourlyMax,
+                            resetDate
+                        });
+                        
+                        if (dailyUsed !== undefined && dailyRemaining !== undefined && 
+                            hourlyUsed !== undefined && hourlyRemaining !== undefined) {
+                            const limits = {
+                                daily: {
+                                    used: parseInt(dailyUsed),
+                                    remaining: parseInt(dailyRemaining),
+                                    max: parseInt(dailyMax)
+                                },
+                                hourly: {
+                                    used: parseInt(hourlyUsed),
+                                    remaining: parseInt(hourlyRemaining),
+                                    max: parseInt(hourlyMax)
+                                },
+                                resetDate: resetDate || ''
+                            };
+                            console.log('✅ 새로고침 제한 설정:', limits);
+                            setRefreshLimits(limits);
+                        } else {
+                            console.log('❌ 필수 헤더가 없습니다');
+                        }
+                    } else {
+                        console.log('❌ 응답 헤더가 없습니다');
+                    }
+                    
                     return Array.isArray(rec.data) ? rec.data : [];
                 } catch {
                     return [];
@@ -305,17 +277,23 @@ const Dashboard: React.FC = () => {
                 }
             }, 500);
             
-            // 필터링 후 부족하면 FALLBACK_RECS에서 보충
+            // 중복 제거 및 필터링 (더미 데이터 사용 안함)
             const filteredRecs = allRecs.filter(track => !currentLikedTracks.has(track.id));
-            let finalRecs = filteredRecs.slice(0, 8);
             
-            if (finalRecs.length < 4) {
-                const fallbackFiltered = FALLBACK_RECS.filter(track => !currentLikedTracks.has(track.id));
-                const needed = Math.max(4 - finalRecs.length, 0);
-                finalRecs = [...finalRecs, ...fallbackFiltered.slice(0, needed)];
-            }
+            // ID 기반 중복 제거
+            const uniqueRecs = filteredRecs.filter((track, index, self) => 
+                index === self.findIndex(t => t.id === track.id)
+            );
             
-            setRecommendations(finalRecs.slice(0, 8));
+            // 제목+아티스트 기반 중복 제거 (더 엄격한 중복 체크)
+            const finalRecs = uniqueRecs.filter((track, index, self) => 
+                index === self.findIndex(t => 
+                    t.title.toLowerCase().trim() === track.title.toLowerCase().trim() && 
+                    t.artist.toLowerCase().trim() === track.artist.toLowerCase().trim()
+                )
+            ).slice(0, 8);
+            
+            setRecommendations(finalRecs);
             
             // 캐시 저장
             if (finalRecs.length > 0) {
@@ -325,9 +303,8 @@ const Dashboard: React.FC = () => {
         } catch (error) {
             console.error('추천 음악 로딩 실패:', error);
             
-            // Error Fallback - API 실패 시 인기 차트로 대체
-            const fallbackFiltered = FALLBACK_RECS.filter(track => !likedTracks.has(track.id));
-            setRecommendations(fallbackFiltered.slice(0, 4));
+            // Error Fallback - API 실패 시 빈 상태로 유지 (더미 데이터 사용 안함)
+            setRecommendations([]);
         } finally {
             if (isRefresh) {
                 setRefreshLoading(false);
@@ -336,60 +313,47 @@ const Dashboard: React.FC = () => {
     };
 
     const handleRefresh = async () => {
-        const currentState = refreshState;
-        const refreshCheck = canRefresh(currentState);
-        
-        if (!refreshCheck.allowed) {
-            let message = '';
-            switch (refreshCheck.reason) {
-                case 'cooldown':
-                    message = `⏰ ${refreshCheck.waitTime}초 후 새로고침 가능해요!`;
-                    break;
-                case 'daily_limit':
-                    message = `📅 오늘의 새로고침을 모두 사용했어요! (${REFRESH_LIMITS.daily}회)\n내일 새벽에 자동으로 새로운 추천이 준비될 예정이에요! 🎵`;
-                    break;
-                case 'hourly_limit':
-                    message = `🕐 시간당 새로고침 한도를 초과했어요! (${REFRESH_LIMITS.hourly}회)\n1시간 후에 다시 시도해주세요!`;
-                    break;
-            }
-            alert(message);
-            setShowRefreshStatus(true);
-            setTimeout(() => setShowRefreshStatus(false), 5000);
+        if (!canRefresh()) {
+            alert('새로고침 제한에 도달했습니다.');
             return;
         }
         
-        const now = Date.now();
-        const newState: RefreshState = {
-            ...currentState,
-            dailyCount: currentState.dailyCount + 1,
-            hourlyCount: currentState.hourlyCount + 1,
-            lastRefresh: now,
-            nextAllowed: now + (REFRESH_LIMITS.cooldown * 1000)
-        };
+        setRefreshLoading(true);
         
-        updateRefreshState(newState);
-        // 새로고침 시 캐시 무시하고 새로운 데이터 로드
-        await loadRecommendationsAsync(true);
+        try {
+            await loadRecommendationsAsync(true);
+        } catch (error) {
+            console.error('새로고침 실패:', error);
+            // 서버에서 제한 에러가 온 경우
+            if (error && typeof error === 'object' && 'response' in error) {
+                const response = (error as any).response;
+                if (response?.status === 429 || response?.data?.message) {
+                    alert(response.data.message || '새로고침 제한에 도달했습니다.');
+                    setShowRefreshStatus(true);
+                    setTimeout(() => setShowRefreshStatus(false), 5000);
+                } else {
+                    alert('새로고침 중 오류가 발생했습니다.');
+                }
+            } else {
+                alert('새로고침 중 오류가 발생했습니다.');
+            }
+        } finally {
+            setRefreshLoading(false);
+        }
     };
 
     const getRefreshButtonText = () => {
-        const remaining = REFRESH_LIMITS.daily - refreshState.dailyCount;
-        const hourlyRemaining = REFRESH_LIMITS.hourly - refreshState.hourlyCount;
-        const nextAllowed = Math.max(0, Math.ceil((refreshState.nextAllowed - Date.now()) / 1000));
-        
-        if (nextAllowed > 0) {
-            return `⏰ ${nextAllowed}초 후 새로고침 가능`;
+        if (refreshLimits) {
+            if (refreshLimits.daily.remaining <= 0) {
+                return '📅 오늘 새로고침 완료';
+            }
+            if (refreshLimits.hourly.remaining <= 0) {
+                return '🕐 1시간 후 새로고침 가능';
+            }
+            const minRemaining = Math.min(refreshLimits.daily.remaining, refreshLimits.hourly.remaining);
+            return `🔄 새로고침 (${minRemaining}회 남음)`;
         }
-        
-        if (remaining <= 0) {
-            return '📅 오늘 새로고침 완료';
-        }
-        
-        if (hourlyRemaining <= 0) {
-            return '🕐 1시간 후 새로고침 가능';
-        }
-        
-        return `🔄 새로고침 (오늘 ${remaining}/${REFRESH_LIMITS.daily}회 남음)`;
+        return '🔄 새로고침';
     };
 
     const loadDashboardData = useCallback(async () => {
@@ -428,10 +392,8 @@ const Dashboard: React.FC = () => {
             // 캐시된 추천 음악 먼저 로드 (즉시 표시)
             const hasCached = loadCachedRecommendations(false);
             
-            if (!hasCached) {
-                // 캐시가 없으면 비동기로 로드
-                setTimeout(() => loadRecommendationsAsync(false), 100);
-            }
+            // 캐시 여부와 상관없이 서버에서 최신 정보 가져오기 (헤더 정보 때문에)
+            setTimeout(() => loadRecommendationsAsync(false), 100);
 
             // 5) 통계 계산 (setState 비동기 고려 없이 로컬 sys 사용)
             const calculated: DashboardStats = {
@@ -453,9 +415,9 @@ const Dashboard: React.FC = () => {
                 favoriteGenres: ['K-Pop', 'Pop', 'Rock'],
                 listeningTime: 847,
             });
-            // 전체 실패 시에도 캐시 시도
+            // 전체 실패 시에도 캐시 시도 (더미 데이터 사용 안함)
             if (!loadCachedRecommendations(false)) {
-                setRecommendations(FALLBACK_RECS.slice(0, 4));
+                setRecommendations([]);
             }
         } finally {
             setLoading(false);
@@ -463,20 +425,10 @@ const Dashboard: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        initializeRefreshState();
         loadDashboardData();
     }, [loadDashboardData]);
     
-    // 실시간 쿨다운 타이머
-    useEffect(() => {
-        if (refreshState.nextAllowed > Date.now()) {
-            const interval = setInterval(() => {
-                setRefreshState(prev => ({ ...prev })); // 리렌더링 트리거
-            }, 1000);
-            
-            return () => clearInterval(interval);
-        }
-    }, [refreshState.nextAllowed]);
+    
 
     if (loading) {
         return (
@@ -575,12 +527,12 @@ const Dashboard: React.FC = () => {
                             )}
                             <button
                                 className={`px-4 py-2 rounded-lg transition-all duration-200 flex items-center space-x-2 ${
-                                    canRefresh(refreshState).allowed 
+                                    canRefresh() && !refreshLoading
                                         ? 'bg-purple-600 hover:bg-purple-700 text-white' 
                                         : 'bg-gray-600 text-gray-300 cursor-not-allowed'
                                 }`}
                                 onClick={handleRefresh}
-                                disabled={!canRefresh(refreshState).allowed || refreshLoading}
+                                disabled={!canRefresh() || refreshLoading}
                             >
                                 {refreshLoading ? (
                                     <>
@@ -597,16 +549,19 @@ const Dashboard: React.FC = () => {
                         </div>
                     </div>
                     
-                    {/* 새로고침 정보 */}
-                    <div className="mb-4 text-center">
-                        <div className="inline-flex items-center space-x-4 bg-white/5 rounded-lg px-4 py-2 text-sm text-blue-200">
-                            <span>📊 일일: {refreshState.dailyCount}/{REFRESH_LIMITS.daily}</span>
-                            <span>⏱️ 시간당: {refreshState.hourlyCount}/{REFRESH_LIMITS.hourly}</span>
-                            {refreshState.lastRefresh > 0 && (
-                                <span>🕐 마지막: {new Date(refreshState.lastRefresh).toLocaleTimeString()}</span>
-                            )}
+                    {/* 서버 기반 새로고침 정보 */}
+                    {refreshLimits && (
+                        <div className="mb-4 text-center">
+                            <div className="inline-flex items-center space-x-4 bg-white/5 rounded-lg px-4 py-2 text-sm text-blue-200">
+                                <span>📊 일일: {refreshLimits.daily.used}/{refreshLimits.daily.max}</span>
+                                <span>⏱️ 시간당: {refreshLimits.hourly.used}/{refreshLimits.hourly.max}</span>
+                                <span>🔄 남은 횟수: {Math.min(refreshLimits.daily.remaining, refreshLimits.hourly.remaining)}회</span>
+                                {refreshLimits.resetDate && (
+                                    <span>🕐 리셋: {new Date(refreshLimits.resetDate).toLocaleDateString()}</span>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {refreshLoading && (
                         <div className="mb-6 text-center">

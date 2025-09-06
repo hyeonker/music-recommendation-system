@@ -19,6 +19,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Docker
 - **Build and run full stack**: `docker-compose up --build`
 - **Run with existing images**: `docker-compose up`
+- **Stop services**: `docker-compose down`
+
+### Testing
+- **Backend tests**: `./gradlew test`
+- **Frontend tests**: `cd frontend && npm test`
+- **Backend with coverage**: `./gradlew test jacocoTestReport`
 
 ## Architecture Overview
 
@@ -85,3 +91,27 @@ com.example.musicrecommendation/
 2. Backend runs on :9090 with `local` profile
 3. Frontend proxy configured to backend (see `frontend/package.json`)
 4. Both services can run simultaneously for full-stack development
+
+### Key Dependencies & Technologies
+**Backend Stack**:
+- Spring Boot 3.5.4, Java 21
+- PostgreSQL with Flyway migrations
+- Spring Security with OAuth2 (Google, Kakao, Naver)
+- Caffeine caching, Resilience4j for retries
+- WebSocket/STOMP for real-time features
+- Spotify Web API integration
+
+**Frontend Stack**:
+- React 19+ with TypeScript
+- TailwindCSS for styling
+- React Query (@tanstack/react-query) for server state
+- Framer Motion for animations
+- STOMP.js for WebSocket connections
+- Axios for HTTP requests
+
+### Important Notes
+- Use `local` profile for development: `--spring.profiles.active=local`
+- Database migrations are in `src/main/resources/db/migration/`
+- Frontend uses proxy to backend in development (port 3000 → 9090)
+- Docker setup uses `docker` profile and different port (18080)
+- Chat messages are encrypted using AES (configured in application.yml)
