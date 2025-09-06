@@ -25,7 +25,7 @@ public class ChatMessageService {
     private final NotificationService notificationService;
 
     @Transactional(readOnly = true)
-    public List<ChatMessageDto> getMessages(Long roomId, int limit, boolean asc) {
+    public List<ChatMessageDto> getMessages(String roomId, int limit, boolean asc) {
         var sort = Sort.by(asc ? Sort.Direction.ASC : Sort.Direction.DESC, "createdAt");
         var pageable = PageRequest.of(0, Math.max(1, Math.min(limit, 100)), sort);
 
@@ -45,7 +45,7 @@ public class ChatMessageService {
     }
 
     @Transactional
-    public ChatMessageDto saveText(Long roomId, Long senderId, String plaintext) {
+    public ChatMessageDto saveText(String roomId, Long senderId, String plaintext) {
         var m = new ChatMessage();
         m.setRoomId(roomId);
         m.setSenderId(senderId);
@@ -107,16 +107,19 @@ public class ChatMessageService {
         }
     }
     
-    private Long extractReceiverIdFromRoom(Long roomId, Long senderId) {
+    private Long extractReceiverIdFromRoom(String roomId, Long senderId) {
         // 간단한 roomId 파싱 로직 (예: roomId가 두 사용자 ID의 조합인 경우)
         // 실제 구현에서는 채팅방 정보 테이블을 조회해야 함
         try {
-            String roomStr = String.valueOf(roomId);
-            if (roomStr.length() >= 2) {
-                // roomId에서 다른 사용자 ID 추출 (단순 예제)
-                String possibleId = roomStr.substring(roomStr.length() - 1);
-                Long possibleReceiverId = Long.parseLong(possibleId);
-                return possibleReceiverId.equals(senderId) ? null : possibleReceiverId;
+            // hex string roomId에서 사용자 ID 추출하는 로직
+            // 실제 구현에서는 채팅방 정보 테이블을 조회해야 함
+            if (roomId != null && roomId.length() >= 2) {
+                // 단순 예제: roomId의 마지막 문자를 숫자로 변환 시도
+                String lastChar = roomId.substring(roomId.length() - 1);
+                if (lastChar.matches("[0-9]")) {
+                    Long possibleReceiverId = Long.parseLong(lastChar);
+                    return possibleReceiverId.equals(senderId) ? null : possibleReceiverId;
+                }
             }
         } catch (Exception e) {
             // 파싱 실패시 null 반환
@@ -128,7 +131,7 @@ public class ChatMessageService {
      * 해당 채팅방에서 senderId가 아닌 다른 참여자 찾기
      */
     @Transactional(readOnly = true)
-    public Long findOtherParticipant(Long roomId, Long senderId) {
+    public Long findOtherParticipant(String roomId, Long senderId) {
         try {
             List<Long> participants = repository.findDistinctSenderIdByRoomId(roomId);
             System.out.println("[ChatMessageService] 채팅방 " + roomId + " 참여자들: " + participants);
@@ -149,5 +152,5 @@ public class ChatMessageService {
         }
     }
 
-    public record ChatMessageDto(Long id, Long roomId, Long senderId, String content, Instant createdAt) { }
+    public record ChatMessageDto(Long id, String roomId, Long senderId, String content, Instant createdAt) { }
 }

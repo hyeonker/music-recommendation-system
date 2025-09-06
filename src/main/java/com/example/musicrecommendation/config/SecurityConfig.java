@@ -45,6 +45,7 @@ public class SecurityConfig {
                                 "/api/public/**",
                                 "/api/realtime-matching/**",  // 매칭 API 허용
                                 "/api/chat/**",               // 채팅 API 허용
+                                "/api/chat-reports/**",       // 채팅 신고 API 허용
                                 "/api/user-profile/**",       // 프로필 API 허용
                                 "/api/users/**",              // 사용자 API 허용
                                 "/api/spotify/**",            // Spotify API 허용
@@ -71,6 +72,7 @@ public class SecurityConfig {
                         new AntPathRequestMatcher("/ws-native/**"),
                         new AntPathRequestMatcher("/api/realtime-matching/**"),
                         new AntPathRequestMatcher("/api/chat/**"),
+                        new AntPathRequestMatcher("/api/chat-reports/**"),
                         new AntPathRequestMatcher("/api/user-profile/**"),
                         new AntPathRequestMatcher("/api/users/**"),
                         new AntPathRequestMatcher("/api/spotify/**"),

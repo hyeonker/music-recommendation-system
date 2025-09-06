@@ -41,7 +41,7 @@ const AdminPanel: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [activeTab, setActiveTab] = useState<'reports' | 'users' | 'badges' | 'notifications'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'users' | 'badges' | 'notifications' | 'chatreports'>('reports');
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [batchBadgeModal, setBatchBadgeModal] = useState(false);
@@ -80,7 +80,7 @@ const AdminPanel: React.FC = () => {
 
   const checkAdminAuth = async () => {
     try {
-      const response = await fetch('/api/admin/reports/stats', {
+      const response = await fetch('/api/chat-reports/admin/statistics', {
         credentials: 'include'
       });
       
@@ -349,6 +349,17 @@ const AdminPanel: React.FC = () => {
               >
                 <Bell className="w-4 h-4" />
                 시스템 알림
+              </button>
+              <button
+                onClick={() => setActiveTab('chatreports')}
+                className={`px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2 ${
+                  activeTab === 'chatreports'
+                    ? 'bg-white/20 text-white shadow-lg'
+                    : 'text-blue-200 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <MessageSquare className="w-4 h-4" />
+                채팅 신고
               </button>
             </div>
           </div>
@@ -781,6 +792,36 @@ const AdminPanel: React.FC = () => {
               </div>
             </div>
           </>
+        )}
+
+        {/* 채팅 신고 관리 탭 */}
+        {activeTab === 'chatreports' && (
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-blue-400" />
+                채팅 신고 관리
+              </h3>
+              <a
+                href="/admin/reports"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <MessageSquare className="w-4 h-4 text-blue-400" />
+                <span className="text-white font-medium">신고 관리 페이지로 이동</span>
+              </a>
+            </div>
+            <div className="text-center py-8">
+              <MessageSquare className="w-16 h-16 mx-auto mb-4 text-blue-400 opacity-50" />
+              <p className="text-gray-300 mb-4">
+                채팅 신고를 관리하려면 전용 관리 페이지를 사용하세요.
+              </p>
+              <p className="text-sm text-gray-400">
+                전용 페이지에서 신고 내역 조회, 상태 변경, 통계 확인 등의 작업을 수행할 수 있습니다.
+              </p>
+            </div>
+          </div>
         )}
 
         {/* 시스템 알림 관리 탭 */}

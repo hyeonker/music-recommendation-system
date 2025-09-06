@@ -37,7 +37,7 @@ public class RecommendationLimitService {
     /**
      * 현재 새로고침 상태 조회 (카운트 증가하지 않음)
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public RefreshLimitResult checkCurrentRefreshStatus(Long userId) {
         try {
             LocalDate today = LocalDate.now();

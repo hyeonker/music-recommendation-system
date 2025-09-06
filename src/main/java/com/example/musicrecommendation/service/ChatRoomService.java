@@ -73,9 +73,10 @@ public class ChatRoomService {
     /** DB room_id에서 다른 참여자 찾기 */
     private Long findReceiverByDbRoomId(String roomId, Long senderId) {
         try {
-            long dbRoomId = toDbRoomId(roomId);
-            if (dbRoomId <= 0) {
-                System.out.println("[ChatRoomService] 유효하지 않은 DB room ID: " + dbRoomId);
+            // roomId를 직접 사용 (hex string 형식)
+            String dbRoomId = roomId;
+            if (dbRoomId == null || dbRoomId.isEmpty()) {
+                System.out.println("[ChatRoomService] 유효하지 않은 room ID: " + dbRoomId);
                 return null;
             }
             
@@ -124,8 +125,9 @@ public class ChatRoomService {
 
         // DB 저장
         try {
-            long dbRoomId = toDbRoomId(roomId);
-            if (dbRoomId > 0) {
+            // roomId를 직접 사용 (hex string 형식)
+            String dbRoomId = roomId;
+            if (dbRoomId != null && !dbRoomId.isEmpty()) {
                 chatMessageService.saveText(dbRoomId, senderId, messageContent);
             }
         } catch (Exception e) {
@@ -146,9 +148,9 @@ public class ChatRoomService {
 
         chatHistory.computeIfAbsent(roomId, k -> new ArrayList<>()).add(messageObj);
 
-        // 실시간 브로드캐스트
+        // 실시간 브로드캐스트 (WebSocketChatController와 동일한 형태)
         System.out.println("[ChatRoomService] sendMessage roomId=" + roomId + " senderId=" + senderId + " type=" + t);
-        messagingTemplate.convertAndSend("/topic/chat/" + roomId, new Object() {
+        messagingTemplate.convertAndSend("/topic/room." + roomId, new Object() {
             public final String type = "NEW_MESSAGE";
             public final Object message = messageObj;
             public final String timestamp = LocalDateTime.now().toString();
@@ -165,8 +167,9 @@ public class ChatRoomService {
     public Object shareMusicTrack(String roomId, Long senderId, String trackName, String artist, String spotifyUrl) {
         // 1. 채팅 메시지로 저장 (기존 기능)
         try {
-            long dbRoomId = toDbRoomId(roomId);
-            if (dbRoomId > 0) {
+            // roomId를 직접 사용 (hex string 형식)
+            String dbRoomId = roomId;
+            if (dbRoomId != null && !dbRoomId.isEmpty()) {
                 String line = "🎵 " + (artist == null ? "" : artist) + " - " +
                         (trackName == null ? "" : trackName) +
                         (spotifyUrl == null || spotifyUrl.isBlank() ? "" : " (" + spotifyUrl + ")");
@@ -176,33 +179,48 @@ public class ChatRoomService {
             System.err.println("[ChatRoomService] saveText (music) failed: " + e.getMessage());
         }
 
-        // 2. 음악 공유 히스토리에 저장 (새 기능)
+        // 2. 음악 공유 알림을 시스템 메시지로 항상 전송
         try {
-            System.out.println("[ChatRoomService] 음악 공유 히스토리 저장 시작: roomId=" + roomId + ", senderId=" + senderId);
+            String senderName = "음악친구"; // 기본값 (실제 구현에서는 UserService에서 가져와야 함)
             
-            // DB room_id에서 다른 참여자 찾기
-            Long receiverUserId = findReceiverByDbRoomId(roomId, senderId);
-            System.out.println("[ChatRoomService] DB에서 찾은 수신자: receiverUserId=" + receiverUserId);
+            // 음악 공유 시스템 메시지 생성 및 전송
+            String systemMessage = String.format("🎵 %s님이 음악을 공유했습니다: %s - %s", 
+                senderName, 
+                artist != null ? artist : "Unknown Artist",
+                trackName != null ? trackName : "Unknown Track"
+            );
+            addSystemMessage(roomId, systemMessage);
             
-            if (receiverUserId != null) {
-                // 공유한 사용자의 이름 추출 (실제 구현에서는 UserService에서 가져와야 함)
-                String senderName = "음악친구"; // 기본값
+            System.out.println("[ChatRoomService] System message sent for music sharing: " + systemMessage);
+            
+            // 3. 음악 공유 히스토리에 저장 (수신자를 찾을 수 있는 경우에만)
+            try {
+                System.out.println("[ChatRoomService] 음악 공유 히스토리 저장 시작: roomId=" + roomId + ", senderId=" + senderId);
                 
-                // 음악 공유 히스토리 저장
-                musicSharingHistoryService.saveMusicShare(
-                    receiverUserId, senderId, senderName,
-                    trackName != null ? trackName : "Unknown Track",
-                    artist != null ? artist : "Unknown Artist",
-                    spotifyUrl, roomId, null // matchingSessionId는 나중에 추가 가능
-                );
+                // DB room_id에서 다른 참여자 찾기
+                Long receiverUserId = findReceiverByDbRoomId(roomId, senderId);
+                System.out.println("[ChatRoomService] DB에서 찾은 수신자: receiverUserId=" + receiverUserId);
                 
-                System.out.println("[ChatRoomService] Music sharing history saved: " + 
-                    trackName + " by " + artist + " from user " + senderId + " to user " + receiverUserId);
-            } else {
-                System.out.println("[ChatRoomService] 수신자를 찾을 수 없어서 음악 히스토리 저장 생략");
+                if (receiverUserId != null) {
+                    // 음악 공유 히스토리 저장
+                    musicSharingHistoryService.saveMusicShare(
+                        receiverUserId, senderId, senderName,
+                        trackName != null ? trackName : "Unknown Track",
+                        artist != null ? artist : "Unknown Artist",
+                        spotifyUrl, roomId, null // matchingSessionId는 나중에 추가 가능
+                    );
+                    
+                    System.out.println("[ChatRoomService] Music sharing history saved: " + 
+                        trackName + " by " + artist + " from user " + senderId + " to user " + receiverUserId);
+                } else {
+                    System.out.println("[ChatRoomService] 수신자를 찾을 수 없어서 음악 히스토리 저장 생략");
+                }
+            } catch (Exception historyException) {
+                System.err.println("[ChatRoomService] Music sharing history save failed: " + historyException.getMessage());
             }
+            
         } catch (Exception e) {
-            System.err.println("[ChatRoomService] Music sharing history save failed: " + e.getMessage());
+            System.err.println("[ChatRoomService] System message sending failed: " + e.getMessage());
         }
 
         Object musicMessage = new Object() {
@@ -223,7 +241,7 @@ public class ChatRoomService {
 
         chatHistory.computeIfAbsent(roomId, k -> new ArrayList<>()).add(musicMessage);
 
-        messagingTemplate.convertAndSend("/topic/chat/" + roomId, new Object() {
+        messagingTemplate.convertAndSend("/topic/room." + roomId, new Object() {
             public final String type = "MUSIC_SHARED";
             public final Object message = musicMessage;
             public final String timestamp = LocalDateTime.now().toString();
@@ -240,7 +258,7 @@ public class ChatRoomService {
     public void deactivateChatRoom(String roomId) {
         if (chatRooms.containsKey(roomId)) {
             addSystemMessage(roomId, "💔 매칭이 종료되었습니다. 채팅방이 비활성화됩니다.");
-            messagingTemplate.convertAndSend("/topic/chat/" + roomId, new Object() {
+            messagingTemplate.convertAndSend("/topic/room." + roomId, new Object() {
                 public final String type = "ROOM_DEACTIVATED";
                 public final String message = "채팅방이 비활성화되었습니다";
                 public final String timestamp = LocalDateTime.now().toString();
@@ -336,22 +354,34 @@ public class ChatRoomService {
 
     /** 시스템 메시지 추가 + 브로드캐스트 */
     private void addSystemMessage(String roomId, String content) {
+        String messageId = UUID.randomUUID().toString();
+        LocalDateTime now = LocalDateTime.now();
+        
         Object systemMessage = new Object() {
-            public final String id = UUID.randomUUID().toString();
+            public final String id = messageId;
             public final String room = roomId;
             public final Long senderId = 0L;
             public final String messageContent = content;
             public final String type = "SYSTEM";
-            public final LocalDateTime timestamp = LocalDateTime.now();
+            public final LocalDateTime timestamp = now;
             public final boolean isSystemMessage = true;
         };
 
         chatHistory.computeIfAbsent(roomId, k -> new ArrayList<>()).add(systemMessage);
 
-        messagingTemplate.convertAndSend("/topic/chat/" + roomId, new Object() {
-            public final String type = "SYSTEM_MESSAGE";
-            public final Object message = systemMessage;
-            public final String timestamp = LocalDateTime.now().toString();
+        // 프론트엔드와 일치하는 형태로 전송 (WebSocketChatController와 동일한 형태)
+        final String finalRoomId = roomId;
+        final String finalContent = content;
+        messagingTemplate.convertAndSend("/topic/room." + roomId, new Object() {
+            public final String id = messageId;
+            public final String roomId = finalRoomId;
+            public final int senderId = 0;
+            public final String senderName = "시스템";
+            public final String content =
+
+                    finalContent;
+            public final String timestamp = now.toString();
+            public final String createdAt = now.toString();
         });
     }
 }

@@ -5,7 +5,7 @@ import java.time.OffsetDateTime;
 
 public record ChatMessageResponse(
         Long id,
-        Long roomId,
+        String roomId,
         Long senderId,
         String content,              // 복호화된 평문
         OffsetDateTime createdAt,

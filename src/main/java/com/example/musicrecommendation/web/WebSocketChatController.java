@@ -107,10 +107,10 @@ public class WebSocketChatController {
                 expiryNotificationService.sendRoomExtensionNotification(roomId);
             }
             
-            // UUID roomId를 직접 해시하여 DB ID로 사용
-            Long dbRoomId = (long) Math.abs(roomId.hashCode());
+            // roomId를 직접 DB에 저장 (hex string 형식)
+            String dbRoomId = roomId;
             
-            System.out.println("🔥 WebSocketChatController: UUID roomId: " + roomId + ", DB roomId: " + dbRoomId + ", senderId: " + senderId);
+            System.out.println("🔥 WebSocketChatController: roomId: " + roomId + ", senderId: " + senderId);
             
             // 메시지 저장
             var savedMessage = chatMessageService.saveText(dbRoomId, senderId, message.content());
@@ -176,7 +176,7 @@ public class WebSocketChatController {
             
             ChatMessageResponse response = new ChatMessageResponse(
                 -1L,
-                (long) Math.abs(roomId.hashCode()), // UUID를 DB ID로 변환
+                roomId, // roomId를 직접 사용 (hex string 형식)
                 senderId,
                 username + "님이 채팅방에 입장했습니다.",
                 OffsetDateTime.now(ZoneOffset.UTC),
@@ -187,7 +187,7 @@ public class WebSocketChatController {
         } catch (Exception e) {
             ChatMessageResponse errorResponse = new ChatMessageResponse(
                 -1L,
-                -1L,
+                "-1",
                 -1L,
                 "사용자 입장 처리 실패",
                 OffsetDateTime.now(ZoneOffset.UTC),
@@ -210,7 +210,7 @@ public class WebSocketChatController {
             
             ChatMessageResponse response = new ChatMessageResponse(
                 -1L,
-                (long) Math.abs(roomId.hashCode()), // UUID를 DB ID로 변환
+                roomId, // roomId를 직접 사용 (hex string 형식)
                 senderId,
                 username + "님이 채팅방에서 나갔습니다.",
                 OffsetDateTime.now(ZoneOffset.UTC),
@@ -221,7 +221,7 @@ public class WebSocketChatController {
         } catch (Exception e) {
             ChatMessageResponse errorResponse = new ChatMessageResponse(
                 -1L,
-                -1L,
+                "-1",
                 -1L,
                 "사용자 퇴장 처리 실패",
                 OffsetDateTime.now(ZoneOffset.UTC),
@@ -272,8 +272,8 @@ public class WebSocketChatController {
                 "private_" + senderId + "_" + targetId : 
                 "private_" + targetId + "_" + senderId;
                 
-            // 메시지 저장
-            Long dbRoomId = (long) Math.abs(privateRoomId.hashCode());
+            // 메시지 저장 (privateRoomId를 직접 사용)
+            String dbRoomId = privateRoomId;
             var savedMessage = chatMessageService.saveText(dbRoomId, senderId, message.content());
             
             // 수신자에게 메시지 전송

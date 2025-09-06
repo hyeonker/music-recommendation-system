@@ -104,8 +104,8 @@ export const validateInput = (input: string, fieldName: string = 'Input'): {
     };
   }
   
-  // HTML 이스케이프 적용
-  const sanitized = escapeHtml(input.trim());
+  // HTML 이스케이프 적용 (공백 보존)
+  const sanitized = escapeHtml(input);
   
   return { isValid: true, sanitized };
 };
@@ -119,7 +119,7 @@ export const sanitizeText = (str: string): string => {
   // 허용되는 문자: 한글, 영문, 숫자, 공백, 기본 특수문자
   const allowedChars = /[^a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ\s\-_.,!?()[\]{}@#$%&*+=|\\:;"'<>\/~`]/g;
   
-  return str.replace(allowedChars, '').trim();
+  return str.replace(allowedChars, '');
 };
 
 /**
@@ -157,8 +157,8 @@ export const validateReviewText = (text: string): {
     };
   }
   
-  // 기본 HTML 이스케이프만 적용 (SQL 인젝션은 덜 엄격하게)
-  const sanitized = escapeHtml(text.trim());
+  // 기본 HTML 이스케이프만 적용 (SQL 인젝션은 덜 엄격하게, 공백 보존)
+  const sanitized = escapeHtml(text);
   
   return { isValid: true, sanitized };
 };

@@ -119,3 +119,27 @@ com.example.musicrecommendation/
 - Chat messages are encrypted using AES (configured in application.yml)
 - OAuth2 credentials for local development are configurable via environment variables
 - Spotify API integration uses client credentials flow (keys in application-local.yml)
+
+## Critical Development Guidelines
+
+### Port Management
+- **Backend port is currently 9090** - NEVER change without explicit user approval
+- Any port changes must be discussed and approved before implementation
+
+### Code Quality Standards
+- **NO HARDCODING**: All configuration values must be externalized to application.yml or environment variables
+- **Security First**: Always implement proper security measures and never expose sensitive data
+- **Performance Optimization**: Code must be optimized for production performance
+- **Production Readiness**: All code must be designed for easy maintenance and operation in production environments
+
+### Database Migration Protocol
+- **ALWAYS check existing migration files** before creating new ones
+- List all files in `src/main/resources/db/migration/` to avoid duplicates
+- Follow proper Flyway naming conventions (V{version}__{description}.sql)
+- Ensure backward compatibility when possible
+
+### Operational Excellence
+- Design for maintainability and operational ease
+- Include proper logging, monitoring, and error handling
+- Consider scalability and resource usage
+- Implement proper configuration management for different environments

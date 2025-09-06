@@ -328,14 +328,14 @@ public class MusicMatchingService {
             Optional<UserProfile> profile2 = userProfileRepository.findByUserId(user2Id);
 
             if (profile1.isEmpty() || profile2.isEmpty()) {
-                return 0.2; // 기본값
+                return 0.4; // 기본값 상향 조정
             }
 
             List<Map<String, Object>> artists1 = profile1.get().getFavoriteArtists();
             List<Map<String, Object>> artists2 = profile2.get().getFavoriteArtists();
 
             if (artists1.isEmpty() || artists2.isEmpty()) {
-                return 0.2;
+                return 0.4; // 기본값 상향 조정
             }
 
             // 아티스트 이름 추출
@@ -348,22 +348,37 @@ public class MusicMatchingService {
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
 
-            // Jaccard 유사도
+            // Jaccard 유사도 계산
             Set<String> common = new HashSet<>(artistNames1);
             common.retainAll(artistNames2);
             
             Set<String> union = new HashSet<>(artistNames1);
             union.addAll(artistNames2);
 
-            return union.isEmpty() ? 0.2 : (double) common.size() / union.size();
+            if (union.isEmpty()) {
+                return 0.4;
+            }
+
+            double jaccardSimilarity = (double) common.size() / union.size();
+            
+            // 공통 아티스트가 많을수록 보너스 점수 (최대 0.4 추가)
+            double commonBonus = Math.min(0.4, common.size() * 0.15);
+            
+            // 최종 점수 = Jaccard 유사도 + 공통 아티스트 보너스
+            double finalScore = Math.min(1.0, jaccardSimilarity + commonBonus);
+            
+            log.debug("아티스트 유사도 - 공통:{}, 전체:{}, Jaccard:{:.3f}, 보너스:{:.3f} = {:.3f}", 
+                    common.size(), union.size(), jaccardSimilarity, commonBonus, finalScore);
+            
+            return finalScore;
         } catch (Exception e) {
             log.warn("아티스트 유사도 계산 실패: {}", e.getMessage());
-            return 0.2;
+            return 0.4;
         }
     }
 
     /**
-     * 선호 장르 기반 유사도 (가중치 20%)
+     * 선호 장르 기반 유사도 (가중치 15%)
      */
     private double calculateGenreSimilarity(Long user1Id, Long user2Id) {
         try {
@@ -371,14 +386,14 @@ public class MusicMatchingService {
             Optional<UserProfile> profile2 = userProfileRepository.findByUserId(user2Id);
 
             if (profile1.isEmpty() || profile2.isEmpty()) {
-                return 0.3; // 기본값
+                return 0.5; // 기본값 상향 조정
             }
 
             List<Map<String, Object>> genres1 = profile1.get().getFavoriteGenres();
             List<Map<String, Object>> genres2 = profile2.get().getFavoriteGenres();
 
             if (genres1.isEmpty() || genres2.isEmpty()) {
-                return 0.3;
+                return 0.5; // 기본값 상향 조정
             }
 
             // 장르 이름 추출
@@ -391,22 +406,37 @@ public class MusicMatchingService {
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
 
-            // Jaccard 유사도
+            // Jaccard 유사도 계산
             Set<String> common = new HashSet<>(genreNames1);
             common.retainAll(genreNames2);
             
             Set<String> union = new HashSet<>(genreNames1);
             union.addAll(genreNames2);
 
-            return union.isEmpty() ? 0.3 : (double) common.size() / union.size();
+            if (union.isEmpty()) {
+                return 0.5;
+            }
+
+            double jaccardSimilarity = (double) common.size() / union.size();
+            
+            // 공통 장르가 많을수록 보너스 점수 (최대 0.3 추가)
+            double commonBonus = Math.min(0.3, common.size() * 0.12);
+            
+            // 최종 점수 = Jaccard 유사도 + 공통 장르 보너스
+            double finalScore = Math.min(1.0, jaccardSimilarity + commonBonus);
+            
+            log.debug("장르 유사도 - 공통:{}, 전체:{}, Jaccard:{:.3f}, 보너스:{:.3f} = {:.3f}", 
+                    common.size(), union.size(), jaccardSimilarity, commonBonus, finalScore);
+            
+            return finalScore;
         } catch (Exception e) {
             log.warn("장르 유사도 계산 실패: {}", e.getMessage());
-            return 0.3;
+            return 0.5;
         }
     }
 
     /**
-     * 참여 페스티벌 기반 유사도 (가중치 20%)
+     * 참여 페스티벌 기반 유사도 (가중치 15%)
      */
     private double calculateFestivalSimilarity(Long user1Id, Long user2Id) {
         try {
@@ -414,14 +444,14 @@ public class MusicMatchingService {
             Optional<UserProfile> profile2 = userProfileRepository.findByUserId(user2Id);
 
             if (profile1.isEmpty() || profile2.isEmpty()) {
-                return 0.2; // 기본값
+                return 0.4; // 기본값 상향 조정
             }
 
             List<String> festivals1 = profile1.get().getAttendedFestivals();
             List<String> festivals2 = profile2.get().getAttendedFestivals();
 
             if (festivals1 == null || festivals2 == null || festivals1.isEmpty() || festivals2.isEmpty()) {
-                return 0.2;
+                return 0.4; // 기본값 상향 조정
             }
 
             // 페스티벌 이름 정규화 (대소문자 무시, 공백 제거)
@@ -441,15 +471,25 @@ public class MusicMatchingService {
             Set<String> union = new HashSet<>(normalizedFestivals1);
             union.addAll(normalizedFestivals2);
 
-            double similarity = union.isEmpty() ? 0.2 : (double) common.size() / union.size();
+            if (union.isEmpty()) {
+                return 0.4;
+            }
+
+            double jaccardSimilarity = (double) common.size() / union.size();
             
-            // 보너스: 공통 페스티벌이 많을수록 추가 점수 (페스티벌은 특별한 경험)
-            double bonus = Math.min(0.4, common.size() * 0.15);
+            // 보너스: 공통 페스티벌이 많을수록 추가 점수 (페스티벌은 특별한 경험이므로 높은 보너스)
+            double commonBonus = Math.min(0.5, common.size() * 0.2);
             
-            return Math.min(1.0, similarity + bonus);
+            // 최종 점수 = Jaccard 유사도 + 공통 페스티벌 보너스
+            double finalScore = Math.min(1.0, jaccardSimilarity + commonBonus);
+            
+            log.debug("페스티벌 유사도 - 공통:{}, 전체:{}, Jaccard:{:.3f}, 보너스:{:.3f} = {:.3f}", 
+                    common.size(), union.size(), jaccardSimilarity, commonBonus, finalScore);
+            
+            return finalScore;
         } catch (Exception e) {
             log.warn("페스티벌 유사도 계산 실패: {}", e.getMessage());
-            return 0.2;
+            return 0.4;
         }
     }
 
@@ -670,5 +710,100 @@ public class MusicMatchingService {
      */
     public Long getUserSuccessfulMatchCount(Long userId) {
         return userMatchRepository.countSuccessfulMatchesByUserId(userId);
+    }
+
+    /**
+     * 두 사용자 간의 공통 장르 추출
+     */
+    public List<String> getCommonGenres(Long user1Id, Long user2Id) {
+        try {
+            Optional<UserProfile> profile1 = userProfileRepository.findByUserId(user1Id);
+            Optional<UserProfile> profile2 = userProfileRepository.findByUserId(user2Id);
+
+            if (profile1.isEmpty() || profile2.isEmpty()) {
+                log.debug("사용자 프로필이 없어서 공통 장르 계산 불가: user1={}, user2={}", user1Id, user2Id);
+                return new ArrayList<>();
+            }
+
+            List<Map<String, Object>> genres1 = profile1.get().getFavoriteGenres();
+            List<Map<String, Object>> genres2 = profile2.get().getFavoriteGenres();
+
+            if (genres1 == null || genres2 == null || genres1.isEmpty() || genres2.isEmpty()) {
+                log.debug("장르 데이터가 없어서 공통 장르 계산 불가: user1={}, user2={}", user1Id, user2Id);
+                return new ArrayList<>();
+            }
+
+            // 장르 이름 추출
+            Set<String> genreNames1 = genres1.stream()
+                    .map(genre -> (String) genre.get("name"))
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .collect(Collectors.toSet());
+            Set<String> genreNames2 = genres2.stream()
+                    .map(genre -> (String) genre.get("name"))
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .collect(Collectors.toSet());
+
+            log.debug("사용자 {} 장르: {}", user1Id, genreNames1);
+            log.debug("사용자 {} 장르: {}", user2Id, genreNames2);
+
+            // 공통 장르 찾기
+            Set<String> commonGenres = new HashSet<>(genreNames1);
+            commonGenres.retainAll(genreNames2);
+            
+            List<String> result = new ArrayList<>(commonGenres);
+            log.debug("사용자 {} <-> {} 공통 장르: {}", user1Id, user2Id, result);
+            
+            return result;
+        } catch (Exception e) {
+            log.warn("공통 장르 추출 실패: user1={}, user2={}, error={}", user1Id, user2Id, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 두 사용자 간의 공통 아티스트 추출
+     */
+    public List<String> getCommonArtists(Long user1Id, Long user2Id) {
+        try {
+            Optional<UserProfile> profile1 = userProfileRepository.findByUserId(user1Id);
+            Optional<UserProfile> profile2 = userProfileRepository.findByUserId(user2Id);
+
+            if (profile1.isEmpty() || profile2.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            List<Map<String, Object>> artists1 = profile1.get().getFavoriteArtists();
+            List<Map<String, Object>> artists2 = profile2.get().getFavoriteArtists();
+
+            if (artists1 == null || artists2 == null || artists1.isEmpty() || artists2.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            // 아티스트 이름 추출
+            Set<String> artistNames1 = artists1.stream()
+                    .map(artist -> (String) artist.get("name"))
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .collect(Collectors.toSet());
+            Set<String> artistNames2 = artists2.stream()
+                    .map(artist -> (String) artist.get("name"))
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .collect(Collectors.toSet());
+
+            // 공통 아티스트 찾기
+            Set<String> commonArtists = new HashSet<>(artistNames1);
+            commonArtists.retainAll(artistNames2);
+            
+            List<String> result = new ArrayList<>(commonArtists);
+            log.debug("사용자 {} <-> {} 공통 아티스트: {}", user1Id, user2Id, result);
+            
+            return result;
+        } catch (Exception e) {
+            log.warn("공통 아티스트 추출 실패: user1={}, user2={}, error={}", user1Id, user2Id, e.getMessage());
+            return new ArrayList<>();
+        }
     }
 }

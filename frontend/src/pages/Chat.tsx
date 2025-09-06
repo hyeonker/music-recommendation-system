@@ -1,7 +1,7 @@
 // frontend/src/pages/Chat.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Send, Paperclip, Smile, User, Loader2, Music, ArrowLeft, CheckCheck, LogOut } from 'lucide-react';
+import { Send, Paperclip, Smile, User, Loader2, Music, ArrowLeft, CheckCheck, LogOut, Flag, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '../api/client';
 import { useSocket } from '../context/SocketContext';
@@ -77,6 +77,154 @@ const getSenderDisplayName = (message: ChatMessage): string => {
 };
 
 /* ===================== 서브 컴포넌트 ===================== */
+const ReportModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSubmit: (reportData: any) => void;
+    reportedUserId: number;
+    reportedUserName: string;
+    chatRoomId: string;
+}> = ({ isOpen, onClose, onSubmit, reportedUserId, reportedUserName, chatRoomId }) => {
+    const [reportType, setReportType] = useState('INAPPROPRIATE_MESSAGE');
+    const [reason, setReason] = useState('');
+    const [additionalInfo, setAdditionalInfo] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const reportTypes = {
+        'INAPPROPRIATE_MESSAGE': '부적절한 메시지',
+        'HARASSMENT': '괴롭힘/혐오',
+        'SPAM': '스팸/도배',
+        'FAKE_PROFILE': '허위 프로필',
+        'SEXUAL_CONTENT': '성적인 내용',
+        'VIOLENCE_THREAT': '폭력/위협',
+        'OTHER': '기타'
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!reason.trim()) {
+            toast.error('신고 사유를 입력해주세요');
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            await onSubmit({
+                reportedUserId,
+                chatRoomId,
+                reportType,
+                reason: reason.trim(),
+                additionalInfo: additionalInfo.trim() || null
+            });
+            onClose();
+            setReason('');
+            setAdditionalInfo('');
+            setReportType('INAPPROPRIATE_MESSAGE');
+        } catch (error) {
+            console.error('신고 제출 실패:', error);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md">
+                {/* 헤더 */}
+                <div className="flex items-center justify-between p-6 border-b border-gray-700">
+                    <h2 className="text-xl font-bold text-white">사용자 신고</h2>
+                    <button
+                        onClick={onClose}
+                        className="p-2 rounded-full hover:bg-gray-800 transition-colors"
+                    >
+                        <X className="h-5 w-5 text-gray-400" />
+                    </button>
+                </div>
+
+                {/* 내용 */}
+                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                    <div>
+                        <p className="text-sm text-gray-300 mb-2">
+                            신고 대상: <span className="font-medium text-white">{reportedUserName}</span>
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                            신고 유형
+                        </label>
+                        <select
+                            value={reportType}
+                            onChange={(e) => setReportType(e.target.value)}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                            {Object.entries(reportTypes).map(([value, label]) => (
+                                <option key={value} value={value}>{label}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                            신고 사유 <span className="text-red-400">*</span>
+                        </label>
+                        <textarea
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            placeholder="신고 사유를 자세히 설명해주세요..."
+                            rows={3}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                            required
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                            추가 정보 (선택사항)
+                        </label>
+                        <textarea
+                            value={additionalInfo}
+                            onChange={(e) => setAdditionalInfo(e.target.value)}
+                            placeholder="추가적인 정보가 있다면 입력해주세요..."
+                            rows={2}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                        />
+                    </div>
+
+                    <div className="flex gap-3 pt-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                        >
+                            취소
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSubmitting || !reason.trim()}
+                            className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                        >
+                            {isSubmitting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    신고 중...
+                                </>
+                            ) : (
+                                <>
+                                    <Flag className="h-4 w-4" />
+                                    신고하기
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 const ChatMessageItem: React.FC<{
     message: ChatMessage;
     mine: boolean;
@@ -115,58 +263,61 @@ const ChatMessageItem: React.FC<{
     }
 
     return (
-        <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
+        <div className={`flex ${mine ? 'justify-end' : 'justify-start'} group`}>
+            <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm relative ${
                 mine ? 'bg-blue-600 text-white' : 'bg-white/10 text-white'
             }`}>
                 {!mine && (
-                    <div className="flex items-center gap-2 mb-1">
-                        <div className="text-[10px] opacity-70">
-                            {getSenderDisplayName(message)}
-                        </div>
-                        {badge && (
-                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium relative ${
-                                badge.rarity === 'LEGENDARY' 
-                                    ? 'legendary-badge-glow legendary-chat-border shadow-sm' 
-                                    : ''
-                            }`} 
-                                 style={{ 
-                                   backgroundColor: `${badge.badgeColor}20`, 
-                                   color: badge.badgeColor,
-                                   boxShadow: badge.rarity === 'LEGENDARY' 
-                                     ? `0 0 4px ${badge.badgeColor}40, 0 0 6px ${badge.badgeColor}25`
-                                     : 'none',
-                                   border: badge.rarity === 'LEGENDARY'
-                                     ? `1px solid ${badge.badgeColor}60`
-                                     : 'none'
-                                 }}>
-                                {badge.rarity === 'LEGENDARY' && (
-                                    <>
-                                        <div className="absolute -inset-0.5 rounded-full animate-ping opacity-10"
-                                             style={{ backgroundColor: badge.badgeColor }}></div>
-                                        <div className="absolute top-0 left-0 w-full h-full rounded-full"
-                                             style={{ 
-                                               background: `linear-gradient(45deg, transparent, ${badge.badgeColor}30, transparent, ${badge.badgeColor}20, transparent)`,
-                                               animation: 'legendary-wave 3s ease-in-out infinite'
-                                             }}>
-                                        </div>
-                                    </>
-                                )}
-                                {badge.iconUrl && (
-                                    <img src={badge.iconUrl} alt="" 
-                                         className={`w-3 h-3 rounded-full relative z-10 ${
-                                           badge.rarity === 'LEGENDARY' ? 'legendary-icon-float' : ''
-                                         }`} />
-                                )}
-                                <span className={`relative z-10 font-bold ${
-                                    badge.rarity === 'LEGENDARY' ? 'legendary-chat-text' : ''
-                                }`}>{badge.badgeName}</span>
-                                {badge.rarity === 'LEGENDARY' && (
-                                    <span className="legendary-sparkle text-yellow-300 text-[8px]">✨</span>
-                                )}
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-2">
+                            <div className="text-[10px] opacity-70">
+                                {getSenderDisplayName(message)}
                             </div>
-                        )}
-                        {badgeLoading && <div className="w-3 h-3 bg-gray-400 animate-pulse rounded"></div>}
+                            {badge && (
+                                <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium relative ${
+                                    badge.rarity === 'LEGENDARY' 
+                                        ? 'legendary-badge-glow legendary-chat-border shadow-sm' 
+                                        : ''
+                                }`} 
+                                     style={{ 
+                                       backgroundColor: `${badge.badgeColor}20`, 
+                                       color: badge.badgeColor,
+                                       boxShadow: badge.rarity === 'LEGENDARY' 
+                                         ? `0 0 4px ${badge.badgeColor}40, 0 0 6px ${badge.badgeColor}25`
+                                         : 'none',
+                                       border: badge.rarity === 'LEGENDARY'
+                                         ? `1px solid ${badge.badgeColor}60`
+                                         : 'none'
+                                     }}>
+                                    {badge.rarity === 'LEGENDARY' && (
+                                        <>
+                                            <div className="absolute -inset-0.5 rounded-full animate-ping opacity-10"
+                                                 style={{ backgroundColor: badge.badgeColor }}></div>
+                                            <div className="absolute top-0 left-0 w-full h-full rounded-full"
+                                                 style={{ 
+                                                   background: `linear-gradient(45deg, transparent, ${badge.badgeColor}30, transparent, ${badge.badgeColor}20, transparent)`,
+                                                   animation: 'legendary-wave 3s ease-in-out infinite'
+                                                 }}>
+                                            </div>
+                                        </>
+                                    )}
+                                    {badge.iconUrl && (
+                                        <img src={badge.iconUrl} alt="" 
+                                             className={`w-3 h-3 rounded-full relative z-10 ${
+                                               badge.rarity === 'LEGENDARY' ? 'legendary-icon-float' : ''
+                                             }`} />
+                                    )}
+                                    <span className={`relative z-10 font-bold ${
+                                        badge.rarity === 'LEGENDARY' ? 'legendary-chat-text' : ''
+                                    }`}>{badge.badgeName}</span>
+                                    {badge.rarity === 'LEGENDARY' && (
+                                        <span className="legendary-sparkle text-yellow-300 text-[8px]">✨</span>
+                                    )}
+                                </div>
+                            )}
+                            {badgeLoading && <div className="w-3 h-3 bg-gray-400 animate-pulse rounded"></div>}
+                        </div>
+                        
                     </div>
                 )}
                 <div className="whitespace-pre-wrap break-words">
@@ -192,6 +343,14 @@ const Chat: React.FC = () => {
     
     // 사용자별 대표 배지 캐시
     const [userBadges, setUserBadges] = useState<Map<number, RepresentativeBadge | null>>(new Map());
+    
+    // 신고 모달 상태
+    const [reportModal, setReportModal] = useState({
+        isOpen: false,
+        reportedUserId: 0,
+        reportedUserName: '',
+        chatRoomId: ''
+    });
 
     // 방/메시지 상태
     const [rooms, setRooms] = useState<ChatRoom[]>([]);
@@ -617,7 +776,7 @@ const Chat: React.FC = () => {
 
     /* -------- 전송 -------- */
     const handleSend = async () => {
-        const text = input.trim();
+        const text = input;
         if (!text || !activeRoomId || !me) return;
         
         // 채팅방 나간 후 메시지 전송 방지
@@ -725,6 +884,57 @@ const Chat: React.FC = () => {
         }
     };
 
+    /* -------- 신고 처리 -------- */
+    const handleReport = (userId: number, userName: string) => {
+        if (!activeRoomId) {
+            toast.error('채팅방이 활성화되지 않았습니다');
+            return;
+        }
+        
+        setReportModal({
+            isOpen: true,
+            reportedUserId: userId,
+            reportedUserName: userName,
+            chatRoomId: String(activeRoomId)
+        });
+    };
+
+    const submitReport = async (reportData: any) => {
+        if (!me) {
+            toast.error('로그인이 필요합니다');
+            return;
+        }
+        
+        try {
+            const response = await api.post('/api/chat-reports/submit', {
+                reporterId: me.id,
+                ...reportData
+            });
+            
+            if (response.data.success) {
+                toast.success('신고가 접수되었습니다. 검토 후 조치하겠습니다.');
+            } else {
+                throw new Error(response.data.error || '신고 접수 실패');
+            }
+        } catch (error: any) {
+            console.error('신고 제출 실패:', error);
+            if (error.response?.data?.error) {
+                toast.error(error.response.data.error);
+            } else {
+                toast.error('신고 제출에 실패했습니다');
+            }
+        }
+    };
+
+    const closeReportModal = () => {
+        setReportModal({
+            isOpen: false,
+            reportedUserId: 0,
+            reportedUserName: '',
+            chatRoomId: ''
+        });
+    };
+
     /* -------- 좌측: 방 클릭 -------- */
     const openRoom = (rid: string | number) => {
         setActiveRoomId(rid);
@@ -741,198 +951,222 @@ const Chat: React.FC = () => {
     }
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* 좌측: 방 목록 */}
-            <aside className="md:col-span-1 glass-card p-4">
-                <div className="flex items-center gap-2 mb-3">
-                    <ArrowLeft className="w-4 h-4 text-gray-400" />
-                    <h2 className="font-semibold text-white">채팅방</h2>
-                </div>
-                <div className="space-y-2 max-h-[70vh] overflow-auto pr-1">
-                    {rooms.map((r) => (
-                        <button
-                            key={r.id}
-                            onClick={() => openRoom(r.id)}
-                            className={`w-full text-left p-3 rounded-lg transition-all ${
-                                String(r.id) === String(activeRoomId)
-                                    ? 'bg-blue-600/80 text-white'
-                                    : 'hover:bg-white/10 text-white/90'
-                            }`}
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 grid place-items-center">
-                                    <User className="w-4 h-4 text-white" />
-                                </div>
-                                <div className="flex-1">
-                                    <div className="text-sm font-medium truncate">
-                                        {r.name && r.name !== 'undefined' && !r.name.includes('undefined') 
-                                            ? r.name 
-                                            : `방 ${r.id}`}
+        <>
+            {/* 신고 모달 */}
+            <ReportModal
+                isOpen={reportModal.isOpen}
+                onClose={closeReportModal}
+                onSubmit={submitReport}
+                reportedUserId={reportModal.reportedUserId}
+                reportedUserName={reportModal.reportedUserName}
+                chatRoomId={reportModal.chatRoomId}
+            />
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* 좌측: 방 목록 */}
+                <aside className="md:col-span-1 glass-card p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                        <ArrowLeft className="w-4 h-4 text-gray-400" />
+                        <h2 className="font-semibold text-white">채팅방</h2>
+                    </div>
+                    <div className="space-y-2 max-h-[70vh] overflow-auto pr-1">
+                        {rooms.map((r) => (
+                            <button
+                                key={r.id}
+                                onClick={() => openRoom(r.id)}
+                                className={`w-full text-left p-3 rounded-lg transition-all ${
+                                    String(r.id) === String(activeRoomId)
+                                        ? 'bg-blue-600/80 text-white'
+                                        : 'hover:bg-white/10 text-white/90'
+                                }`}
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 grid place-items-center">
+                                        <User className="w-4 h-4 text-white" />
                                     </div>
-                                    {r.lastMessage && r.lastMessage !== 'undefined' ? (
-                                        <div className="text-xs opacity-70 truncate">{r.lastMessage}</div>
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium truncate">
+                                            {r.name && r.name !== 'undefined' && !r.name.includes('undefined') 
+                                                ? r.name 
+                                                : `방 ${r.id}`}
+                                        </div>
+                                        {r.lastMessage && r.lastMessage !== 'undefined' ? (
+                                            <div className="text-xs opacity-70 truncate">{r.lastMessage}</div>
+                                        ) : null}
+                                    </div>
+                                    {r.unread ? (
+                                        <span className="text-[10px] bg-red-500/90 text-white rounded-full px-2 py-0.5">
+                                            {r.unread}
+                                        </span>
                                     ) : null}
                                 </div>
-                                {r.unread ? (
-                                    <span className="text-[10px] bg-red-500/90 text-white rounded-full px-2 py-0.5">
-                    {r.unread}
-                  </span>
-                                ) : null}
-                            </div>
-                        </button>
-                    ))}
-                    {!rooms.length && <div className="text-sm text-gray-400">참여 중인 채팅방이 없습니다.</div>}
-                </div>
-            </aside>
-
-            {/* 우측: 대화창 */}
-            <section className="md:col-span-2 glass-card p-0 overflow-hidden">
-                {/* 헤더 */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 grid place-items-center">
-                        <Music className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <div className="font-semibold truncate text-white" 
-                             style={{ 
-                                 textShadow: '0 2px 4px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.7)'
-                             }}>
-                            {getActiveRoomDisplayName()}
-                        </div>
-                        <div className="text-xs text-green-400 drop-shadow-sm mt-1">
-                            {peerTyping ? '상대가 입력 중…' : isSocketReady ? '실시간 연결됨' : '오프라인 모드'}
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="text-xs text-white/70 flex items-center gap-1">
-                            읽음 동기화
-                            <CheckCheck className="w-4 h-4" />
-                        </div>
-                        {activeRoomId && (
-                            <button
-                                onClick={handleLeaveRoom}
-                                className="p-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 transition-colors"
-                                title="채팅방 나가기"
-                            >
-                                <LogOut className="w-4 h-4" />
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {/* 메시지 리스트 */}
-                <div className="h-[60vh] overflow-y-auto px-4 py-4 space-y-2">
-                    {!activeRoomId && (
-                        <div className="text-center text-sm text-gray-400 mt-10">
-                            왼쪽에서 채팅방을 선택하거나 매칭 후 <b>채팅 시작하기</b> 버튼을 눌러주세요.
-                        </div>
-                    )}
-
-                    {activeRoomId &&
-                        messages.map((m) => {
-                            const mine = me ? String(m.senderId) === String(me.id) : false;
-                            return <ChatMessageItem key={m.id} message={m} mine={mine} fetchUserBadge={fetchUserBadge} />;
-                        })}
-                    <div ref={endRef} />
-                </div>
-
-                {/* 입력창 */}
-                <div className="px-4 py-3 border-t border-white/10">
-                    <div className="flex items-center gap-2">
-                        <button onClick={onAttach} className="p-2 rounded-lg hover:bg-white/10">
-                            <Paperclip className="w-5 h-5 text-white/80" />
-                        </button>
-                        <button onClick={() => toast('이모지는 곧 제공됩니다 😄')} className="p-2 rounded-lg hover:bg-white/10">
-                            <Smile className="w-5 h-5 text-white/80" />
-                        </button>
-                        <input
-                            ref={inputRef}
-                            value={input}
-                            onChange={(e) => {
-                                const rawValue = e.target.value;
-                                const validation = validateReviewText(rawValue);
-                                if (!validation.isValid) {
-                                    toast.error(validation.error || '메시지에 허용되지 않는 내용이 포함되어 있습니다');
-                                    return;
-                                }
-                                setInput(validation.sanitized);
-                                setIsTyping(true);
-                            }}
-                            onKeyDown={(e) => {
-                                // 스페이스바는 항상 허용
-                                if (e.key === ' ') {
-                                    // 스페이스바 입력 허용 (기본 동작 유지)
-                                    return;
-                                }
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSend();
-                                }
-                            }}
-                            placeholder={activeRoomId ? '메시지를 입력하세요…' : '채팅방을 먼저 선택하세요'}
-                            className="flex-1 bg-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none placeholder:text-white/50"
-                            disabled={!activeRoomId || sending}
-                        />
-                        {/* 음악 공유 버튼 */}
-                        <button
-                            onClick={async () => {
-                                const trackInfo = prompt("음악 정보를 입력하세요 (형식: 아티스트 - 곡제목)");
-                                if (trackInfo && trackInfo.includes(" - ")) {
-                                    const [artist, track] = trackInfo.split(" - ");
-                                    console.log('🎵 음악 공유 시도:', { artist: artist.trim(), track: track.trim(), roomId: activeRoomId });
-                                    
-                                    if (socket?.shareMusic) {
-                                        try {
-                                            await socket.shareMusic(activeRoomId || '', {
-                                                trackName: track.trim(),
-                                                artistName: artist.trim(),
-                                                spotifyUrl: ''
-                                            });
-                                            console.log('✅ 음악 공유 완료');
-                                            toast.success(`🎵 ${artist.trim()} - ${track.trim()} 음악을 공유했습니다!`);
-                                        } catch (error) {
-                                            console.error('❌ 음악 공유 실패:', error);
-                                            toast.error('음악 공유에 실패했습니다');
-                                        }
-                                    } else {
-                                        console.warn('⚠️ WebSocket 연결되지 않음');
-                                        toast.error('실시간 연결이 필요합니다');
-                                    }
-                                } else {
-                                    toast.error('올바른 형식으로 입력해주세요 (예: IU - Blueming)');
-                                }
-                            }}
-                            disabled={!activeRoomId || !socket?.isConnected}
-                            className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 hover:text-purple-200 rounded-lg transition-colors disabled:opacity-50 border border-purple-500/30"
-                            title="음악 공유"
-                        >
-                            <Music className="w-5 h-5" />
-                        </button>
-                        
-                        <button
-                            onClick={handleSend}
-                            disabled={!activeRoomId || sending || !input.trim()}
-                            className="btn-primary px-4 py-2 disabled:opacity-50"
-                        >
-                            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        </button>
-                    </div>
-
-                    {/* 퀵 리플라이 */}
-                    <div className="flex flex-wrap gap-2 mt-3">
-                        {['플리 공유할래요?', '요즘 뭐 들어요?', '공연 보러 가요!', '최애는 누구?'].map((t) => (
-                            <button
-                                key={t}
-                                onClick={() => setInput((prev) => (prev ? prev + ' ' + t : t))}
-                                className="px-2 py-1 text-xs rounded-full bg-white/10 text-white hover:bg-white/20"
-                            >
-                                {t}
                             </button>
                         ))}
+                        {!rooms.length && <div className="text-sm text-gray-400">참여 중인 채팅방이 없습니다.</div>}
                     </div>
-                </div>
-            </section>
-        </div>
+                </aside>
+
+                {/* 우측: 대화창 */}
+                <section className="md:col-span-2 glass-card p-0 overflow-hidden">
+                    {/* 헤더 */}
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 grid place-items-center">
+                            <Music className="w-5 h-5 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="font-semibold truncate text-white" 
+                                 style={{ 
+                                     textShadow: '0 2px 4px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.7)'
+                                 }}>
+                                {getActiveRoomDisplayName()}
+                            </div>
+                            <div className="text-xs text-green-400 drop-shadow-sm mt-1">
+                                {peerTyping ? '상대가 입력 중…' : isSocketReady ? '실시간 연결됨' : '오프라인 모드'}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="text-xs text-white/70 flex items-center gap-1">
+                                읽음 동기화
+                                <CheckCheck className="w-4 h-4" />
+                            </div>
+                            {activeRoomId && (
+                                <button
+                                    onClick={handleLeaveRoom}
+                                    className="p-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 transition-colors"
+                                    title="채팅방 나가기"
+                                >
+                                    <LogOut className="w-4 h-4" />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* 메시지 리스트 */}
+                    <div className="h-[60vh] overflow-y-auto px-4 py-4 space-y-2">
+                        {!activeRoomId && (
+                            <div className="text-center text-sm text-gray-400 mt-10">
+                                왼쪽에서 채팅방을 선택하거나 매칭 후 <b>채팅 시작하기</b> 버튼을 눌러주세요.
+                            </div>
+                        )}
+
+                        {activeRoomId &&
+                            messages.map((m) => {
+                                const mine = me ? String(m.senderId) === String(me.id) : false;
+                                return <ChatMessageItem key={m.id} message={m} mine={mine} fetchUserBadge={fetchUserBadge} />;
+                            })}
+                        <div ref={endRef} />
+                    </div>
+
+                    {/* 입력창 */}
+                    <div className="px-4 py-3 border-t border-white/10">
+                        <div className="flex items-center gap-2">
+                            <button onClick={onAttach} className="p-2 rounded-lg hover:bg-white/10">
+                                <Paperclip className="w-5 h-5 text-white/80" />
+                            </button>
+                            <button onClick={() => toast('이모지는 곧 제공됩니다 😄')} className="p-2 rounded-lg hover:bg-white/10">
+                                <Smile className="w-5 h-5 text-white/80" />
+                            </button>
+                            <input
+                                ref={inputRef}
+                                value={input}
+                                onChange={(e) => {
+                                    const rawValue = e.target.value;
+                                    const validation = validateReviewText(rawValue);
+                                    if (!validation.isValid) {
+                                        toast.error(validation.error || '메시지에 허용되지 않는 내용이 포함되어 있습니다');
+                                        return;
+                                    }
+                                    setInput(validation.sanitized);
+                                    setIsTyping(true);
+                                }}
+                                onKeyDown={(e) => {
+                                    // 스페이스바는 항상 허용
+                                    if (e.key === ' ') {
+                                        // 스페이스바 입력 허용 (기본 동작 유지)
+                                        return;
+                                    }
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleSend();
+                                    }
+                                }}
+                                placeholder={activeRoomId ? '메시지를 입력하세요…' : '채팅방을 먼저 선택하세요'}
+                                className="flex-1 bg-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none placeholder:text-white/50"
+                                disabled={!activeRoomId || sending}
+                            />
+                            {/* 음악 공유 버튼 */}
+                            <button
+                                onClick={async () => {
+                                    const trackInfo = prompt("음악 정보를 입력하세요 (형식: 아티스트 - 곡제목)");
+                                    if (trackInfo && trackInfo.includes(" - ")) {
+                                        const [artist, track] = trackInfo.split(" - ");
+                                        console.log('🎵 음악 공유 시도:', { artist: artist.trim(), track: track.trim(), roomId: activeRoomId });
+                                        
+                                        if (socket?.shareMusic) {
+                                            try {
+                                                await socket.shareMusic(activeRoomId || '', {
+                                                    trackName: track.trim(),
+                                                    artistName: artist.trim(),
+                                                    spotifyUrl: ''
+                                                });
+                                                console.log('✅ 음악 공유 완료');
+                                                toast.success(`🎵 ${artist.trim()} - ${track.trim()} 음악을 공유했습니다!`);
+                                            } catch (error) {
+                                                console.error('❌ 음악 공유 실패:', error);
+                                                toast.error('음악 공유에 실패했습니다');
+                                            }
+                                        } else {
+                                            console.warn('⚠️ WebSocket 연결되지 않음');
+                                            toast.error('실시간 연결이 필요합니다');
+                                        }
+                                    } else {
+                                        toast.error('올바른 형식으로 입력해주세요 (예: IU - Blueming)');
+                                    }
+                                }}
+                                disabled={!activeRoomId || !socket?.isConnected}
+                                className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 hover:text-purple-200 rounded-lg transition-colors disabled:opacity-50 border border-purple-500/30"
+                                title="음악 공유"
+                            >
+                                <Music className="w-5 h-5" />
+                            </button>
+                            
+                            <button
+                                onClick={handleSend}
+                                disabled={!activeRoomId || sending || !input}
+                                className="btn-primary px-4 py-2 disabled:opacity-50"
+                            >
+                                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                            </button>
+                        </div>
+
+                        {/* 신고하기 버튼 */}
+                        {activeRoomId && (
+                            <div className="mt-3">
+                                <button
+                                    onClick={() => {
+                                        // 매칭된 사용자 정보 가져오기
+                                        try {
+                                            const matchedUserData = JSON.parse(sessionStorage.getItem('matchedUser') || 'null');
+                                            if (matchedUserData?.id && matchedUserData?.name) {
+                                                handleReport(matchedUserData.id, matchedUserData.name);
+                                            } else {
+                                                toast.error('신고할 대상을 찾을 수 없습니다');
+                                            }
+                                        } catch (e) {
+                                            toast.error('사용자 정보를 불러올 수 없습니다');
+                                        }
+                                    }}
+                                    className="px-4 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                    <Flag className="w-4 h-4" />
+                                    상대방 신고하기
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </section>
+            </div>
+        </>
     );
 };
 

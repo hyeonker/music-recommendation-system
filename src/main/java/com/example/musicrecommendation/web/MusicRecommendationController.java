@@ -54,8 +54,23 @@ public class MusicRecommendationController {
     @GetMapping("/user/{userId}")
     public ResponseEntity<?> getUserRecommendations(@PathVariable Long userId) {
         try {
-            // 추천 조회 시에는 현재 상태만 확인 (증가하지 않음)
-            var limitResult = limitService.checkCurrentRefreshStatus(userId);
+            // 추천 조회 시 새로고침 카운트 증가 및 제한 확인
+            var limitResult = limitService.checkAndIncrementRefreshCount(userId);
+            
+            // 제한 초과 시 바로 반환
+            if (!limitResult.isSuccess()) {
+                return ResponseEntity.ok()
+                    .header("X-Refresh-Used", String.valueOf(limitResult.getCurrentCount()))
+                    .header("X-Refresh-Remaining", String.valueOf(limitResult.getRemainingCount()))
+                    .header("X-Refresh-Max", String.valueOf(limitResult.getMaxCount()))
+                    .header("X-Refresh-Reset-Date", limitResult.getResetDate().toString())
+                    .header("X-Limit-Exceeded", "true")
+                    .body(Map.of(
+                        "success", false,
+                        "message", limitResult.getMessage(),
+                        "recommendations", Collections.emptyList()
+                    ));
+            }
             
             // 추천 생성 (설정 기반 제한값 사용)
             List<Map<String, Object>> recommendations = generateSpotifyBasedRecommendations(
@@ -88,7 +103,10 @@ public class MusicRecommendationController {
                 .body(recommendations);
                 
         } catch (Exception e) {
-            log.error("추천 생성 중 에러 발생: {}", e.getMessage(), e);
+            log.error("=== 추천 생성 중 에러 발생 ===");
+            log.error("사용자 ID: {}", userId);
+            log.error("에러 메시지: {}", e.getMessage());
+            log.error("에러 스택 트레이스:", e);
             
             // 에러 상황에서도 기본 제한 정보 헤더 추가
             int dailyMax = 10;
@@ -127,7 +145,9 @@ public class MusicRecommendationController {
      * 제한된 수의 추천 생성
      */
     private List<Map<String, Object>> generateSpotifyBasedRecommendations(Long userId, int maxCount) {
-        log.debug("사용자 {}에 대한 추천 생성 시작 (최대 {}곡)", userId, maxCount);
+        log.info("=== 추천 생성 시작 ===");
+        log.info("사용자 ID: {}", userId);
+        log.info("최대 곡 수: {}", maxCount);
         
         // 1. 사용자별 최근 추천 이력 관리
         Set<String> userRecentTracks = getUserRecentRecommendations(userId);
@@ -343,8 +363,10 @@ public class MusicRecommendationController {
         updateUserRecentRecommendations(userId, finalRecommendations);
         
         // 10. 로깅으로 중복 문제 진단
-        log.debug("사용자 {} 추천 생성 완료 - 최초 {}곡 -> 최종 {}곡", 
-                 userId, recommendations.size(), finalRecommendations.size());
+        log.info("=== 추천 생성 완료 ===");
+        log.info("사용자 ID: {}", userId);
+        log.info("최초 추천: {}곡", recommendations.size());
+        log.info("최종 추천: {}곡", finalRecommendations.size());
         
         if (finalRecommendations.size() != recommendations.size()) {
             log.info("사용자 {} 추천에서 {}개 중복/다양성 문제 제거됨", 

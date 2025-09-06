@@ -42,8 +42,7 @@ public class ChatMessageController {
         
         int safeLimit = Math.min(Math.max(limit, 1), 100);
         boolean asc = !"desc".equalsIgnoreCase(order);
-        Long normalizedRoomId = normalizeRoomId(roomId);
-        return ResponseEntity.ok(chatMessageService.getMessages(normalizedRoomId, safeLimit, asc));
+        return ResponseEntity.ok(chatMessageService.getMessages(roomId, safeLimit, asc));
     }
 
     @PostMapping("/rooms/{roomId}/messages")
@@ -63,15 +62,14 @@ public class ChatMessageController {
             return ResponseEntity.status(403).body("채팅방 접근 권한이 없습니다");
         }
         
-        if (content.trim().isEmpty()) {
+        if (content.isEmpty()) {
             return ResponseEntity.badRequest().body("메시지 내용이 필요합니다");
         }
         
         // 채팅방 활동 업데이트
         secureChatRoomService.updateRoomActivity(roomId);
         
-        Long normalizedRoomId = normalizeRoomId(roomId);
-        chatMessageService.saveText(normalizedRoomId, userId, content.trim());
+        chatMessageService.saveText(roomId, userId, content);
         return ResponseEntity.ok().build();
     }
 
@@ -92,15 +90,14 @@ public class ChatMessageController {
             return ResponseEntity.status(403).body("채팅방 접근 권한이 없습니다");
         }
         
-        if (request.content().trim().isEmpty()) {
+        if (request.content().isEmpty()) {
             return ResponseEntity.badRequest().body("메시지 내용이 필요합니다");
         }
         
         // 채팅방 활동 업데이트
         secureChatRoomService.updateRoomActivity(roomId);
         
-        Long normalizedRoomId = normalizeRoomId(roomId);
-        chatMessageService.saveText(normalizedRoomId, userId, request.content().trim());
+        chatMessageService.saveText(roomId, userId, request.content());
         return ResponseEntity.ok().build();
     }
     
@@ -121,22 +118,4 @@ public class ChatMessageController {
         return null;
     }
     
-    // roomId 정규화 헬퍼 메소드
-    private Long normalizeRoomId(String roomId) {
-        if (roomId == null) throw new IllegalArgumentException("roomId는 필수입니다");
-        
-        // "room_1_2" -> "12" 또는 해시값으로 변환
-        String digits = roomId.replaceAll("\\D", "");
-        if (!digits.isEmpty()) {
-            try {
-                return Long.parseLong(digits.length() > 10 ? digits.substring(0, 10) : digits);
-            } catch (NumberFormatException e) {
-                // 파싱 실패시 해시값 사용
-                return (long) Math.abs(roomId.hashCode());
-            }
-        }
-        
-        // 숫자가 없으면 해시값 사용
-        return (long) Math.abs(roomId.hashCode());
-    }
 }

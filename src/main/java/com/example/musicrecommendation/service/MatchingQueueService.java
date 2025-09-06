@@ -240,12 +240,12 @@ public class MatchingQueueService {
             // 실제 매칭 정보 조회
             UserMatch actualMatch = getOrCreateMatch(user1Id, user2Id);
             
-            // 매칭 결과 객체 생성 (실제 데이터 기반)
-            Object matchResult = createEnhancedMatchResultObject(user1Id, user2Id, actualMatch, chatRoomId);
+            // 매칭 결과 객체 생성 (최신 계산된 호환성 점수 사용)
+            Object matchResult = createEnhancedMatchResultObject(user1Id, user2Id, actualMatch, chatRoomId, compatibilityScore);
 
-            // Event를 통한 매칭 성공 알림 전송 (책임 분리)
-            publishMatchingSuccessEvent(user1Id, user2Id, actualMatch, chatRoomId);
-            publishMatchingSuccessEvent(user2Id, user1Id, actualMatch, chatRoomId);
+            // Event를 통한 매칭 성공 알림 전송 (최신 호환성 점수 사용)
+            publishMatchingSuccessEvent(user1Id, user2Id, actualMatch, chatRoomId, compatibilityScore);
+            publishMatchingSuccessEvent(user2Id, user1Id, actualMatch, chatRoomId, compatibilityScore);
             
             log.info("매칭 성공 처리 완료: {} <-> {}, 유사도: {:.3f}", 
                     user1Id, user2Id, compatibilityScore);
@@ -348,7 +348,7 @@ public class MatchingQueueService {
     /**
      * 향상된 매칭 결과 객체 생성 (실제 MusicMatchingService 기반)
      */
-    private Object createEnhancedMatchResultObject(Long user1Id, Long user2Id, UserMatch actualMatch, String chatRoomId) {
+    private Object createEnhancedMatchResultObject(Long user1Id, Long user2Id, UserMatch actualMatch, String chatRoomId, double latestCompatibilityScore) {
         return new Object() {
             public final String type = "MATCH_SUCCESS";
             public final String title = "🎵 실제 음악 취향 매칭 성공!";
@@ -356,8 +356,8 @@ public class MatchingQueueService {
             public final Object matchInfo = new Object() {
                 public final Long userId1 = user1Id;
                 public final Long userId2 = user2Id;
-                public final double compatibility = Math.round(actualMatch.getSimilarityScore() * 100.0) / 100.0;
-                public final String compatibilityText = (int)(actualMatch.getSimilarityScore() * 100) + "% 음악 호환성";
+                public final double compatibility = Math.round(latestCompatibilityScore * 100.0) / 100.0;
+                public final String compatibilityText = (int)(latestCompatibilityScore * 100) + "% 음악 호환성";
                 public final String matchReason = actualMatch.getMatchReason() != null ? 
                     actualMatch.getMatchReason() : "다양한 음악적 요소 분석 결과";
                 public final int commonLikedSongs = actualMatch.getCommonLikedSongs();
@@ -517,7 +517,7 @@ public class MatchingQueueService {
     /**
      * 매칭 성공 이벤트 발행 (책임 분리)
      */
-    private void publishMatchingSuccessEvent(Long userId, Long matchedUserId, UserMatch matchData, String chatRoomId) {
+    private void publishMatchingSuccessEvent(Long userId, Long matchedUserId, UserMatch matchData, String chatRoomId, double latestCompatibilityScore) {
         log.info("매칭 성공 이벤트 발행: userId={}, matchedUserId={}", userId, matchedUserId);
         
         // 실제 사용자 이름 가져오기
@@ -537,6 +537,24 @@ public class MatchingQueueService {
         final String finalMatchedUserName = matchedUserName;
         log.info("매칭된 사용자 이름: {}", finalMatchedUserName);
         
+        // 공통 장르와 아티스트 정보 조회
+        List<String> genresResult = new ArrayList<>();
+        List<String> artistsResult = new ArrayList<>();
+        try {
+            genresResult = musicMatchingService.getCommonGenres(userId, matchedUserId);
+            artistsResult = musicMatchingService.getCommonArtists(userId, matchedUserId);
+            log.info("[공통 관심사] userId={} <-> matchedUserId={}, 공통 장르: {}, 공통 아티스트: {}", 
+                    userId, matchedUserId, genresResult, artistsResult);
+        } catch (Exception e) {
+            log.warn("공통 관심사 조회 실패: userId={}, matchedUserId={}, error={}", userId, matchedUserId, e.getMessage());
+        }
+        final List<String> commonGenres = genresResult;
+        final List<String> commonArtists = artistsResult;
+        
+        // 공통 관심사 텍스트 생성
+        final String commonInterestsText = generateCommonInterestsText(commonGenres, commonArtists);
+        log.info("[공통 관심사 텍스트] userId={} <-> matchedUserId={}: '{}'", userId, matchedUserId, commonInterestsText);
+        
         // 매칭 데이터 객체 생성
         Object additionalData = new Object() {
             public final String type = "MATCHING_SUCCESS";
@@ -548,14 +566,16 @@ public class MatchingQueueService {
                 public final Long id = matchedUserId;
                 public final String name = finalMatchedUserName;
                 public final String roomId = chatRoomId;
-
-
             };
             public final Object matchInfo = new Object() {
-                public final double compatibility = Math.round(matchData.getSimilarityScore() * 100.0) / 100.0;
-                public final String compatibilityText = (int)(matchData.getSimilarityScore() * 100) + "% 음악 호환성";
+                public final double compatibility = Math.round(latestCompatibilityScore * 100.0) / 100.0;
+                public final String compatibilityText = (int)(latestCompatibilityScore * 100) + "% 음악 호환성";
                 public final String matchReason = matchData.getMatchReason();
                 public final int commonLikedSongs = matchData.getCommonLikedSongs();
+                // 공통 관심사 정보 추가 - outer scope의 변수들을 참조
+                public final List<String> sharedGenres = commonGenres;
+                public final List<String> sharedArtists = commonArtists;
+                public final String commonInterests = commonInterestsText;
             };
             public final Object roomId = chatRoomId;
             public final String timestamp = LocalDateTime.now().toString();
@@ -577,5 +597,29 @@ public class MatchingQueueService {
         } catch (Exception e) {
             log.error("매칭 이벤트 발행 실패: userId={}, error={}", userId, e.getMessage());
         }
+    }
+
+    /**
+     * 공통 관심사 텍스트 생성
+     */
+    private String generateCommonInterestsText(List<String> commonGenres, List<String> commonArtists) {
+        List<String> interests = new ArrayList<>();
+        
+        // 공통 장르 추가 (최대 3개)
+        if (commonGenres != null && !commonGenres.isEmpty()) {
+            interests.addAll(commonGenres.stream().limit(3).collect(java.util.stream.Collectors.toList()));
+        }
+        
+        // 공통 아티스트 추가 (최대 2개, 전체 최대 5개까지)
+        if (commonArtists != null && !commonArtists.isEmpty() && interests.size() < 5) {
+            int remainingSlots = 5 - interests.size();
+            interests.addAll(commonArtists.stream().limit(Math.min(remainingSlots, 2)).collect(java.util.stream.Collectors.toList()));
+        }
+        
+        if (interests.isEmpty()) {
+            return "새로운 음악 탐험";
+        }
+        
+        return String.join(", ", interests);
     }
 }

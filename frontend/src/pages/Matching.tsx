@@ -18,9 +18,22 @@ type RepresentativeBadge = {
     badgeColor: string;
 };
 
+type MatchedUserData = {
+    id: number;
+    name: string;
+    chatRoomId?: string;
+    realName?: string; // 실제 이름 (API에서 가져온)
+    // 매칭 알고리즘 관련 실제 데이터
+    compatibilityScore?: number; // 0.0~1.0
+    commonGenres?: string[];
+    commonArtists?: string[]; // 공통 아티스트 추가
+    matchReason?: string;
+    commonSongs?: number;
+};
+
 const Matching: React.FC = () => {
     const [matchingStatus, setMatchingStatus] = useState<MatchStatus>('IDLE');
-    const [matchedUser, setMatchedUser] = useState<any>(null);
+    const [matchedUser, setMatchedUser] = useState<MatchedUserData | null>(null);
     const [waitingTime, setWaitingTime] = useState(0);
     const [queuePosition, setQueuePosition] = useState(0);
     const [isMatching, setIsMatching] = useState(false);
@@ -217,9 +230,13 @@ const Matching: React.FC = () => {
         let processedEvents = new Set<string>(); // 처리된 이벤트 추적
         
         const handleMatchingSuccess = (event: any) => {
-            const data = event?.detail;
-            const roomId = data?.roomId || data?.matchedUser?.roomId;
-            const eventKey = `${roomId}_${data?.matchedUser?.id || 'unknown'}`;
+            const eventData = event?.detail;
+            console.log('🔍 매칭 성공 이벤트 원본 데이터:', eventData);
+            
+            // 백엔드 구조에 따라 실제 매칭 데이터 추출
+            const actualData = eventData?.data || eventData;
+            const roomId = actualData?.roomId || eventData?.matchedUser?.roomId;
+            const eventKey = `${roomId}_${actualData?.matchedUser?.id || 'unknown'}`;
             
             // 이미 처리된 이벤트인지 확인
             if (processedEvents.has(eventKey)) {
@@ -228,14 +245,73 @@ const Matching: React.FC = () => {
             }
             
             processedEvents.add(eventKey);
-            console.log('🎉 새로운 매칭 성공 이벤트 처리:', eventKey, event.detail);
+            console.log('🎉 새로운 매칭 성공 이벤트 처리:', eventKey);
+            console.log('🔍 실제 매칭 데이터:', actualData);
             
-            const matchedUserData = data?.matchedUser || { id: 2, name: '음악친구' };
-            const mUser = {
-                id: matchedUserData.id,
-                name: matchedUserData.name,
-                chatRoomId: roomId
+            // 공통 관심사에서 장르와 아티스트 분리
+            const rawCommonInterests = actualData?.matchInfo?.commonInterests || 
+                                     actualData?.commonGenreArray || 
+                                     actualData?.sharedGenres || [];
+            
+            // 장르와 아티스트 분류 (일반적으로 장르는 짧고 아티스트는 사람 이름)
+            const separateGenresAndArtists = (interests: string[]) => {
+                const genres: string[] = [];
+                const artists: string[] = [];
+                
+                interests.forEach(item => {
+                    // 장르 키워드들 (보통 소문자나 일반 용어)
+                    const genreKeywords = ['pop', 'rock', 'jazz', 'classical', 'indie', 'hip', 'rap', 'electronic', 'folk', 'country', 'blues', 'reggae', 'metal', 'punk', 'disco', 'funk', 'soul', 'r&b', 'k-pop', 'j-pop', 'ballad', 'dance', 'house', 'techno', 'dubstep', 'ambient', 'trance'];
+                    
+                    const itemLower = item.toLowerCase();
+                    const isGenre = genreKeywords.some(keyword => itemLower.includes(keyword)) || 
+                                   item.length < 15; // 짧은 이름은 보통 장르
+                    
+                    if (isGenre) {
+                        genres.push(item);
+                    } else {
+                        artists.push(item);
+                    }
+                });
+                
+                return { genres, artists };
             };
+            
+            const commonInterestsArray = Array.isArray(rawCommonInterests) ? 
+                                       rawCommonInterests : 
+                                       (typeof rawCommonInterests === 'string' ? rawCommonInterests.split(', ') : []);
+            
+            const { genres, artists } = separateGenresAndArtists(commonInterestsArray);
+
+            // 백엔드에서 직접 분리된 데이터 사용 (우선순위)
+            const backendGenres = actualData?.sharedGenres || actualData?.matchInfo?.sharedGenres;
+            const backendArtists = actualData?.sharedArtists || actualData?.matchInfo?.sharedArtists;
+            
+            const mUser: MatchedUserData = {
+                id: actualData?.matchedUser?.id || 2,
+                name: actualData?.matchedUser?.name || '음악친구',
+                chatRoomId: roomId,
+                // 백엔드에서 전달된 실제 매칭 데이터 추가
+                compatibilityScore: actualData?.matchInfo?.compatibility || actualData?.compatibilityScore,
+                commonGenres: backendGenres || (genres.length > 0 ? genres : undefined),
+                commonArtists: backendArtists || (artists.length > 0 ? artists : undefined),
+                matchReason: actualData?.matchInfo?.matchReason || actualData?.matchReason,
+                commonSongs: actualData?.matchInfo?.commonLikedSongs || actualData?.commonSongs
+            };
+            
+            console.log('🎯 생성된 매칭 사용자 객체:', mUser);
+            console.log('📊 장르/아티스트 분리 결과:');
+            console.log('- rawCommonInterests:', rawCommonInterests);
+            console.log('- commonInterestsArray:', commonInterestsArray);
+            console.log('- 분리된 장르:', genres);
+            console.log('- 분리된 아티스트:', artists);
+            console.log('- backendGenres (sharedGenres):', backendGenres);
+            console.log('- backendArtists (sharedArtists):', backendArtists);
+            console.log('- 최종 commonGenres:', mUser.commonGenres);
+            console.log('- 최종 commonArtists:', mUser.commonArtists);
+            console.log('📊 actualData 전체 구조:', actualData);
+            console.log('📊 matchInfo 구조:', actualData?.matchInfo);
+            console.log('📊 actualData.sharedGenres:', actualData?.sharedGenres);
+            console.log('📊 actualData.sharedArtists:', actualData?.sharedArtists);
             
             setMatchingStatus('MATCHED');
             setMatchedUser(mUser);
@@ -365,10 +441,15 @@ const Matching: React.FC = () => {
             setMatchingStatus(status);
             if (status === 'MATCHED') {
                 const roomId = data?.roomId;
-                const mUser = {
+                const mUser: MatchedUserData = {
                     id: data?.matchedWith ?? 2,
                     name: '음악친구',
                     chatRoomId: roomId,
+                    // API 응답에서 실제 매칭 데이터 포함
+                    compatibilityScore: data?.compatibilityScore,
+                    commonGenres: data?.commonGenreArray,
+                    matchReason: data?.matchReason,
+                    commonSongs: data?.commonSongs
                 };
                 setMatchedUser(mUser);
                 
@@ -565,12 +646,14 @@ const Matching: React.FC = () => {
             setMatchedUserBadge(badge);
             
             // 3. 매칭된 사용자 정보 업데이트 (실제 이름으로)
-            const updatedMatchedUser = {
-                ...matchedUser,
-                name: userData.name || '음악친구',
-                realName: userData.name // 실제 이름 보존
-            };
-            setMatchedUser(updatedMatchedUser);
+            if (matchedUser) {
+                const updatedMatchedUser: MatchedUserData = {
+                    ...matchedUser,
+                    name: userData.name || '음악친구',
+                    realName: userData.name // 실제 이름 보존
+                };
+                setMatchedUser(updatedMatchedUser);
+            }
             
             // 4. 세션 스토리지에 실제 정보 저장 (채팅에서 사용)
             const userInfoForChat = {
@@ -594,7 +677,7 @@ const Matching: React.FC = () => {
                     🎵 음악 매칭
                 </h1>
                 <p className="text-lg text-gray-600 dark:text-gray-300">
-                    비슷한 음악 취향을 가진 사람들과 실시간으로 연결되세요
+                    비슷한 음악 취향을 가진 사람들과 실시간으로 연결됩니다 ✨
                 </p>
             </div>
 
@@ -766,8 +849,25 @@ const Matching: React.FC = () => {
                                             </div>
                                         )}
                                     </div>
-                                    <p className="text-green-500 font-medium">85% 음악 취향 일치</p>
-                                    <p className="text-gray-600 dark:text-gray-400 text-sm">공통 관심사: K-POP, 인디, R&B</p>
+                                    <p className="text-green-500 font-medium">
+                                        {matchedUser.compatibilityScore ? 
+                                            `${Math.round(matchedUser.compatibilityScore * 100)}% 음악 취향 일치` : 
+                                            '85% 음악 취향 일치'}
+                                    </p>
+                                    <p className="text-gray-600 dark:text-gray-400 text-sm">
+                                        {(() => {
+                                            const allCommonInterests = [];
+                                            if (matchedUser.commonGenres && matchedUser.commonGenres.length > 0) {
+                                                allCommonInterests.push(...matchedUser.commonGenres);
+                                            }
+                                            if (matchedUser.commonArtists && matchedUser.commonArtists.length > 0) {
+                                                allCommonInterests.push(...matchedUser.commonArtists);
+                                            }
+                                            return allCommonInterests.length > 0 ?
+                                                `공통 관심사: ${allCommonInterests.join(', ')}` :
+                                                '공통 관심사: K-POP, 인디, R&B';
+                                        })()}
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -786,22 +886,48 @@ const Matching: React.FC = () => {
                     </div>
 
                     {/* 매칭 정보 */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="glass-card p-6">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-4">공통 관심사</h3>
+                            <h3 className="font-bold text-gray-800 dark:text-white mb-4">공통 장르</h3>
                             <div className="space-y-2">
-                                <div className="flex items-center">
-                                    <Music className="h-4 w-4 text-blue-500 mr-2" />
-                                    <span className="text-gray-600 dark:text-gray-400">K-POP</span>
-                                </div>
-                                <div className="flex items-center">
-                                    <Music className="h-4 w-4 text-purple-500 mr-2" />
-                                    <span className="text-gray-600 dark:text-gray-400">인디 음악</span>
-                                </div>
-                                <div className="flex items-center">
-                                    <Music className="h-4 w-4 text-pink-500 mr-2" />
-                                    <span className="text-gray-600 dark:text-gray-400">R&B/Soul</span>
-                                </div>
+                                {matchedUser.commonGenres && matchedUser.commonGenres.length > 0 ? (
+                                    matchedUser.commonGenres.map((genre, index) => {
+                                        const colors = ['text-blue-500', 'text-purple-500', 'text-pink-500', 'text-green-500', 'text-yellow-500'];
+                                        const colorClass = colors[index % colors.length];
+                                        return (
+                                            <div key={genre} className="flex items-center">
+                                                <Music className={`h-4 w-4 ${colorClass} mr-2`} />
+                                                <span className="text-gray-600 dark:text-gray-400">{genre}</span>
+                                            </div>
+                                        );
+                                    })
+                                ) : (
+                                    <div className="text-gray-500 dark:text-gray-400 text-sm">
+                                        공통 장르를 찾는 중...
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="glass-card p-6">
+                            <h3 className="font-bold text-gray-800 dark:text-white mb-4">공통 아티스트</h3>
+                            <div className="space-y-2">
+                                {matchedUser.commonArtists && matchedUser.commonArtists.length > 0 ? (
+                                    matchedUser.commonArtists.map((artist, index) => {
+                                        const colors = ['text-red-500', 'text-orange-500', 'text-amber-500', 'text-teal-500', 'text-cyan-500'];
+                                        const colorClass = colors[index % colors.length];
+                                        return (
+                                            <div key={artist} className="flex items-center">
+                                                <Users className={`h-4 w-4 ${colorClass} mr-2`} />
+                                                <span className="text-gray-600 dark:text-gray-400">{artist}</span>
+                                            </div>
+                                        );
+                                    })
+                                ) : (
+                                    <div className="text-gray-500 dark:text-gray-400 text-sm">
+                                        공통 아티스트를 찾는 중...
+                                    </div>
+                                )}
                             </div>
                         </div>
 

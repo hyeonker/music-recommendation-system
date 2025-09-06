@@ -12,6 +12,8 @@ import Stats from './pages/Stats';
 import Profile from './pages/Profile';
 import Reviews from './pages/Reviews';
 import AdminPanel from './pages/AdminPanel';
+import AdminReports from './pages/AdminReports';
+import ProtectedRoute from './components/ProtectedRoute';
 import MusicDiscovery from './pages/MusicDiscovery';
 import MusicHistory from './pages/MusicHistory';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -200,7 +202,22 @@ function App() {
                                             }
                                         />
                                         
-                                        <Route path="/admin" element={<AdminPanel />} />
+                                        <Route 
+                                            path="/admin" 
+                                            element={
+                                                <ProtectedRoute adminOnly={true}>
+                                                    <AdminPanel />
+                                                </ProtectedRoute>
+                                            } 
+                                        />
+                                        <Route 
+                                            path="/admin/reports" 
+                                            element={
+                                                <ProtectedRoute adminOnly={true}>
+                                                    <AdminReports />
+                                                </ProtectedRoute>
+                                            } 
+                                        />
 
                                         {/* ⭐ 새로운 로그인/회원가입 페이지 */}
                                         <Route path="/login" element={<Login />} />

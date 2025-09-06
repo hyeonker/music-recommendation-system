@@ -122,19 +122,33 @@ public class RealtimeMatchingService {
                 var bestMatch = matchCandidates.get(0);
                 var matchedUserProfile = userProfileService.getOrInit(bestMatch.getUser2Id());
                 
+                // 실제 향상된 유사도 다시 계산 (최신 알고리즘 적용)
+                double actualSimilarity = musicMatchingService.calculateEnhancedSimilarity(userId, bestMatch.getUser2Id());
+                System.out.println("=== 향상된 유사도 재계산 ===");
+                System.out.println("기존 bestMatch 유사도: " + bestMatch.getSimilarityScore());
+                System.out.println("새로 계산된 실제 유사도: " + actualSimilarity);
+                
                 // 공통 장르 추출
                 List<String> commonGenres = extractCommonGenres(userId, bestMatch.getUser2Id());
+                System.out.println("=== 공통 장르 추출 결과 ===");
+                System.out.println("User " + userId + " <-> User " + bestMatch.getUser2Id());
+                System.out.println("공통 장르: " + commonGenres);
 
-                // 매칭 결과 생성
+                // 매칭 결과 생성 (새로 계산된 실제 유사도 사용)
                 Object matchResult = new Object() {
                     public final Long matchedUserId = bestMatch.getUser2Id();
                     public final String matchedUserName = "음악친구#" + bestMatch.getUser2Id();
-                    public final double compatibilityScore = bestMatch.getSimilarityScore();
+                    public final double compatibilityScore = actualSimilarity; // 향상된 알고리즘 결과 사용
                     public final String[] commonGenreArray = commonGenres.toArray(new String[0]);
                     public final String matchReason = bestMatch.getMatchReason();
                     public final int commonSongs = bestMatch.getCommonLikedSongs();
                     public final boolean success = true;
                 };
+                
+                System.out.println("=== 매칭 결과 객체 ===");
+                System.out.println("최종 compatibilityScore: " + actualSimilarity + " (" + (int)(actualSimilarity * 100) + "%)");
+                System.out.println("commonGenreArray 길이: " + commonGenres.size());
+                System.out.println("commonGenreArray 내용: " + java.util.Arrays.toString(commonGenres.toArray()));
 
                 // 매칭 생성 및 저장
                 musicMatchingService.createMatch(userId, bestMatch.getUser2Id());
