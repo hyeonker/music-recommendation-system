@@ -2,6 +2,7 @@ package com.example.musicrecommendation.security;
 
 import com.example.musicrecommendation.domain.MusicReview;
 import com.example.musicrecommendation.repository.MusicReviewRepository;
+import com.example.musicrecommendation.repository.ReviewHelpfulRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ import java.util.regex.Pattern;
 public class ReviewSecurityService {
 
     private final MusicReviewRepository reviewRepository;
+    private final ReviewHelpfulRepository reviewHelpfulRepository;
     
     // 스팸 패턴 정의
     private static final Pattern SPAM_PATTERN = Pattern.compile(
@@ -114,22 +116,35 @@ public class ReviewSecurityService {
     }
     
     public boolean canMarkReviewAsHelpful(Long reviewId, Long userId) {
+        log.info("=== 보안 검증 시작 ===");
+        log.info("reviewId: {}, userId: {}", reviewId, userId);
+        
         Optional<MusicReview> reviewOpt = reviewRepository.findById(reviewId);
         
         if (reviewOpt.isEmpty()) {
+            log.warn("보안 검증 실패 - 리뷰 없음: reviewId={}", reviewId);
             return false;
         }
         
         MusicReview review = reviewOpt.get();
+        log.info("리뷰 정보: reviewId={}, reviewUserId={}, currentUserId={}", reviewId, review.getUserId(), userId);
         
         // 자신의 리뷰는 도움이 됨으로 표시할 수 없음
         if (review.getUserId().equals(userId)) {
+            log.warn("보안 검증 실패 - 자신의 리뷰: reviewId={}, userId={}", reviewId, userId);
             return false;
         }
         
-        // TODO: 이미 도움이 됨으로 표시했는지 체크하는 로직 추가 필요
-        // (review_interactions 테이블 구현 후)
+        // 이미 도움이 됨으로 표시했는지 중복 체크
+        boolean alreadyMarked = reviewHelpfulRepository.existsByReviewIdAndUserId(reviewId, userId);
+        log.info("중복 체크 결과: reviewId={}, userId={}, alreadyMarked={}", reviewId, userId, alreadyMarked);
         
+        if (alreadyMarked) {
+            log.warn("보안 검증 실패 - 이미 도움이 됨 표시됨: reviewId={}, userId={}", reviewId, userId);
+            return false;
+        }
+        
+        log.info("보안 검증 통과: reviewId={}, userId={}", reviewId, userId);
         return true;
     }
     

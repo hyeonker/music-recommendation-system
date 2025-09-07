@@ -44,4 +44,25 @@ public interface ReviewReportRepository extends JpaRepository<ReviewReport, Long
      * 특정 상태의 신고들 조회
      */
     Page<ReviewReport> findByStatusOrderByCreatedAtDesc(ReviewReport.ReportStatus status, Pageable pageable);
+
+    /**
+     * 모든 신고 조회 (리뷰, 음악 아이템, 사용자 정보 포함)
+     */
+    @Query("SELECT rr FROM ReviewReport rr " +
+           "LEFT JOIN FETCH rr.review mr " +
+           "LEFT JOIN FETCH mr.musicItem mi " +
+           "LEFT JOIN FETCH mr.user u " +
+           "ORDER BY rr.createdAt DESC")
+    Page<ReviewReport> findAllWithReviewDetails(Pageable pageable);
+
+    /**
+     * 특정 상태의 신고 조회 (리뷰, 음악 아이템, 사용자 정보 포함)
+     */
+    @Query("SELECT rr FROM ReviewReport rr " +
+           "LEFT JOIN FETCH rr.review mr " +
+           "LEFT JOIN FETCH mr.musicItem mi " +
+           "LEFT JOIN FETCH mr.user u " +
+           "WHERE rr.status = :status " +
+           "ORDER BY rr.createdAt DESC")
+    Page<ReviewReport> findByStatusWithReviewDetails(@Param("status") ReviewReport.ReportStatus status, Pageable pageable);
 }

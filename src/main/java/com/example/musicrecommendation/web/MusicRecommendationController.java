@@ -52,10 +52,13 @@ public class MusicRecommendationController {
      * Dashboard용 사용자 맞춤 추천 (Spotify 기반) - 개선된 제한 시스템
      */
     @GetMapping("/user/{userId}")
-    public ResponseEntity<?> getUserRecommendations(@PathVariable Long userId) {
+    public ResponseEntity<?> getUserRecommendations(@PathVariable Long userId,
+                                                   @RequestParam(defaultValue = "false") boolean refresh) {
         try {
-            // 추천 조회 시 새로고침 카운트 증가 및 제한 확인
-            var limitResult = limitService.checkAndIncrementRefreshCount(userId);
+            // refresh 파라미터에 따라 다른 제한 확인 방식 사용
+            var limitResult = refresh 
+                ? limitService.checkAndIncrementRefreshCount(userId)  // 새로고침 시: 카운트 증가
+                : limitService.checkLimitOnly(userId);              // 일반 조회 시: 조회만
             
             // 제한 초과 시 바로 반환
             if (!limitResult.isSuccess()) {
@@ -85,20 +88,15 @@ public class MusicRecommendationController {
             // 총 추천곡 수 조회 (누적 히스토리)
             long totalRecommendationsCount = recommendationHistoryRepository.countByUserId(userId);
             
-            // 시간당 제한도 확인 (가상의 시간당 제한)
-            int hourlyUsed = limitResult.getCurrentCount() > 3 ? 3 : limitResult.getCurrentCount();
-            int hourlyMax = 3;
-            int hourlyRemaining = Math.max(0, hourlyMax - hourlyUsed);
-            
-            // 응답 헤더에 일일 + 시간당 제한 정보 + 총 추천곡 수 추가
+            // 응답 헤더에 일일 + 시간당 제한 정보 + 총 추천곡 수 추가 (실제 데이터 사용)
             return ResponseEntity.ok()
                 .header("X-Refresh-Used", String.valueOf(limitResult.getCurrentCount()))
                 .header("X-Refresh-Remaining", String.valueOf(limitResult.getRemainingCount()))
                 .header("X-Refresh-Max", String.valueOf(limitResult.getMaxCount()))
                 .header("X-Refresh-Reset-Date", limitResult.getResetDate().toString())
-                .header("X-Hourly-Used", String.valueOf(hourlyUsed))
-                .header("X-Hourly-Remaining", String.valueOf(hourlyRemaining))
-                .header("X-Hourly-Max", String.valueOf(hourlyMax))
+                .header("X-Hourly-Used", String.valueOf(limitResult.getHourlyUsed()))
+                .header("X-Hourly-Remaining", String.valueOf(limitResult.getHourlyRemaining()))
+                .header("X-Hourly-Max", String.valueOf(limitResult.getHourlyMax()))
                 .header("X-Total-Count", String.valueOf(totalRecommendationsCount))
                 .body(recommendations);
                 
@@ -160,20 +158,30 @@ public class MusicRecommendationController {
         List<Map<String, Object>> recommendations = new ArrayList<>();
         Set<String> usedTrackIds = new HashSet<>(userRecentTracks); // 최근 추천과 현재 추천 모두 중복 방지
         usedTrackIds.addAll(likedTrackIds); // 좋아요한 곡들도 제외
-        Random random = new Random();
+        
+        // 사용자별 개인화된 Random 시드 생성 (당일 + 사용자 ID 기반)
+        long todayMillis = java.time.LocalDate.now().toEpochDay();
+        long personalizedSeed = userId * 1000 + todayMillis;
+        Random random = new Random(personalizedSeed);
+        log.warn("🎯 [DEBUG] 사용자 {} 개인화 추천 시작 - 시드: {} (userId={}, todayMillis={})", 
+                 userId, personalizedSeed, userId, todayMillis);
         
         try {
             // 2. 사용자 프로필 가져오기
             ProfileDto profile = userProfileService.getOrInit(userId);
-            log.info("사용자 {} 프로필 데이터:", userId);
-            log.info("- 선호 아티스트: {}", profile.getFavoriteArtists());
-            log.info("- 선호 장르: {}", profile.getFavoriteGenres());
+            log.warn("🎯 [DEBUG] === 사용자 {} 프로필 데이터 확인 ===", userId);
+            log.warn("🎯 [DEBUG] 사용자 {}: 선호 아티스트 {}개 - {}", userId, 
+                     profile.getFavoriteArtists() != null ? profile.getFavoriteArtists().size() : 0, 
+                     profile.getFavoriteArtists());
+            log.warn("🎯 [DEBUG] 사용자 {}: 선호 장르 {}개 - {}", userId, 
+                     profile.getFavoriteGenres() != null ? profile.getFavoriteGenres().size() : 0, 
+                     profile.getFavoriteGenres());
             
             // 3. 사용자 리뷰에서 높은 평점 아티스트/장르 추출
             List<String> reviewBasedArtists = getArtistsFromUserReviews(userId);
             List<String> reviewBasedGenres = getGenresFromUserReviews(userId);
-            log.info("리뷰 기반 아티스트: {}", reviewBasedArtists);
-            log.info("리뷰 기반 장르: {}", reviewBasedGenres);
+            log.warn("🎯 [DEBUG] 사용자 {}: 리뷰 기반 아티스트 {}개 - {}", userId, reviewBasedArtists.size(), reviewBasedArtists);
+            log.warn("🎯 [DEBUG] 사용자 {}: 리뷰 기반 장르 {}개 - {}", userId, reviewBasedGenres.size(), reviewBasedGenres);
             
             // 4. 프로필과 리뷰 데이터 결합 및 가중치 적용
             List<WeightedRecommendationSource> weightedSources = new ArrayList<>();
@@ -232,7 +240,7 @@ public class MusicRecommendationController {
                 .collect(Collectors.groupingBy(source -> source.weight));
                 
             List<WeightedRecommendationSource> orderedSources = new ArrayList<>();
-            Random sourceRandom = new Random(System.nanoTime());
+            Random sourceRandom = new Random(userId * 999 + todayMillis); // 사용자별 개인화된 소스 랜덤
             
             // 가중치 높은 순으로 처리하되, 같은 가중치 그룹 내에서만 셔플
             sourcesByWeight.entrySet().stream()
@@ -318,7 +326,7 @@ public class MusicRecommendationController {
                         int tracksToSelect = Math.min(remainingQuota, Math.min(tracks.size(), maxCount - recommendations.size()));
                         
                         for (int i = 0; i < tracksToSelect; i++) {
-                            TrackDto bestTrack = selectBestTrack(tracks, source.weight, usedTrackIds);
+                            TrackDto bestTrack = selectBestTrack(tracks, source.weight, usedTrackIds, userId, todayMillis);
                             if (bestTrack != null) {
                                 Map<String, Object> recommendation = createRecommendationMap(bestTrack, source.description);
                                 recommendations.add(recommendation);
@@ -349,7 +357,7 @@ public class MusicRecommendationController {
             // 7. 부족하면 트렌딩 곡으로 스마트 보충
             if (recommendations.size() < 4) {
                 List<String> trendingGenres = getTrendingGenresForUser(profile);
-                fillWithTrendingTracks(recommendations, usedTrackIds, trendingGenres);
+                fillWithTrendingTracks(recommendations, usedTrackIds, trendingGenres, userId, todayMillis);
             }
             
         } catch (Exception e) {
@@ -363,10 +371,19 @@ public class MusicRecommendationController {
         updateUserRecentRecommendations(userId, finalRecommendations);
         
         // 10. 로깅으로 중복 문제 진단
-        log.info("=== 추천 생성 완료 ===");
-        log.info("사용자 ID: {}", userId);
-        log.info("최초 추천: {}곡", recommendations.size());
-        log.info("최종 추천: {}곡", finalRecommendations.size());
+        log.warn("🎯 [DEBUG] === 추천 생성 완료 ===");
+        log.warn("🎯 [DEBUG] 사용자 ID: {}, 개인화 시드: {}", userId, personalizedSeed);
+        log.warn("🎯 [DEBUG] 최초 추천: {}곡, 최종 추천: {}곡", recommendations.size(), finalRecommendations.size());
+        
+        // 추천 결과의 첫 3곡 로깅 (중복 확인용)
+        if (!finalRecommendations.isEmpty()) {
+            log.warn("🎯 [DEBUG] 사용자 {} 추천 결과 샘플:", userId);
+            for (int i = 0; i < Math.min(3, finalRecommendations.size()); i++) {
+                Map<String, Object> rec = finalRecommendations.get(i);
+                log.warn("🎯 [DEBUG] {}. {} - {} (ID: {})", 
+                        i + 1, rec.get("title"), rec.get("artist"), rec.get("id"));
+            }
+        }
         
         if (finalRecommendations.size() != recommendations.size()) {
             log.info("사용자 {} 추천에서 {}개 중복/다양성 문제 제거됨", 
@@ -442,7 +459,7 @@ public class MusicRecommendationController {
         return quotas;
     }
     
-    private TrackDto selectBestTrack(List<TrackDto> tracks, double userWeight, Set<String> usedIds) {
+    private TrackDto selectBestTrack(List<TrackDto> tracks, double userWeight, Set<String> usedIds, Long userId, long todayMillis) {
         // 이미 사용된 트랙 제외 (ID, 제목+아티스트, 정규화, 키워드 매칭)
         List<TrackDto> availableTracks = tracks.stream()
             .filter(track -> {
@@ -493,8 +510,8 @@ public class MusicRecommendationController {
             return null;
         }
         
-        // 강화된 랜덤 시드 사용 (시간 기반)
-        Random random = new Random(System.nanoTime());
+        // 사용자별 개인화된 랜덤 시드 사용
+        Random random = new Random(userId * 777 + todayMillis);
         
         // 랜덤성을 크게 증가 - 상위 50% 중에서 무작위 선택
         int selectFrom = Math.max(1, availableTracks.size() / 2);
@@ -552,14 +569,14 @@ public class MusicRecommendationController {
     }
     
     private void fillWithTrendingTracks(List<Map<String, Object>> recommendations, 
-                                       Set<String> usedIds, List<String> trendingGenres) {
-        Random random = new Random();
+                                       Set<String> usedIds, List<String> trendingGenres, Long userId, long todayMillis) {
+        Random random = new Random(userId * 555 + todayMillis); // 사용자별 개인화된 트렌딩 랜덤
         
         while (recommendations.size() < 4 && !trendingGenres.isEmpty()) {
             String genre = trendingGenres.get(random.nextInt(trendingGenres.size()));
             try {
                 List<TrackDto> tracks = spotifyService.searchTracks(genre + " 2024", 5);
-                TrackDto bestTrack = selectBestTrack(tracks, 0.4, usedIds);
+                TrackDto bestTrack = selectBestTrack(tracks, 0.4, usedIds, userId, todayMillis);
                 
                 if (bestTrack != null) {
                     recommendations.add(createRecommendationMap(bestTrack, "트렌딩"));

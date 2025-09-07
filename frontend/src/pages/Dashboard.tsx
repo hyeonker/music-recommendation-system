@@ -44,6 +44,11 @@ const STORAGE_KEYS = {
     CACHED_RECS: 'music_recommendations_cache'
 };
 
+// 사용자별 캐시 키 생성
+const getUserSpecificKey = (userId: number, baseKey: string) => {
+    return `${baseKey}_user_${userId}`;
+};
+
 // 더미 데이터 제거 - 실제 추천 시스템 사용
 const FALLBACK_RECS: Recommendation[] = [];
 
@@ -143,37 +148,51 @@ const Dashboard: React.FC = () => {
         return true;
     };
 
-    // 캐시된 추천 음악 로드 (새로고침 시에는 무시)
-    const loadCachedRecommendations = (isRefresh: boolean = false) => {
+    // 사용자별 캐시된 추천 음악 로드 (새로고침 시에는 무시)
+    const loadCachedRecommendations = (userId: number, isRefresh: boolean = false) => {
         // 새로고침일 때는 캐시 무시하고 새로운 데이터 로드
         if (isRefresh) {
-            localStorage.removeItem(STORAGE_KEYS.CACHED_RECS);
+            const userCacheKey = getUserSpecificKey(userId, STORAGE_KEYS.CACHED_RECS);
+            localStorage.removeItem(userCacheKey);
             return false;
         }
         
-        const cached = localStorage.getItem(STORAGE_KEYS.CACHED_RECS);
+        const userCacheKey = getUserSpecificKey(userId, STORAGE_KEYS.CACHED_RECS);
+        const cached = localStorage.getItem(userCacheKey);
         if (cached) {
             try {
-                const { data, timestamp }: { data: Recommendation[], timestamp: number } = JSON.parse(cached);
-                // 캐시 유효 시간을 4시간으로 설정 (새로고침 버튼으로만 갱신)
-                if (Date.now() - timestamp < 4 * 60 * 60 * 1000) {
+                const { data, timestamp, cachedUserId }: { 
+                    data: Recommendation[], 
+                    timestamp: number,
+                    cachedUserId: number 
+                } = JSON.parse(cached);
+                
+                // 캐시된 userId와 현재 userId가 일치하고, 캐시가 유효한지 확인
+                if (cachedUserId === userId && Date.now() - timestamp < 4 * 60 * 60 * 1000) {
+                    console.log(`✅ 사용자 ${userId}의 캐시된 추천 로드`);
                     setRecommendations(data);
                     return true;
+                } else {
+                    // 캐시가 만료되었거나 다른 사용자의 캐시면 삭제
+                    localStorage.removeItem(userCacheKey);
                 }
             } catch {
-                localStorage.removeItem(STORAGE_KEYS.CACHED_RECS);
+                localStorage.removeItem(userCacheKey);
             }
         }
         return false;
     };
 
-    // 추천 음악 캐시 저장
-    const cacheRecommendations = (recs: Recommendation[]) => {
+    // 사용자별 추천 음악 캐시 저장
+    const cacheRecommendations = (userId: number, recs: Recommendation[]) => {
+        const userCacheKey = getUserSpecificKey(userId, STORAGE_KEYS.CACHED_RECS);
         const cacheData = {
             data: recs,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            cachedUserId: userId
         };
-        localStorage.setItem(STORAGE_KEYS.CACHED_RECS, JSON.stringify(cacheData));
+        localStorage.setItem(userCacheKey, JSON.stringify(cacheData));
+        console.log(`💾 사용자 ${userId}의 추천 캐시 저장: ${recs.length}개`);
     };
 
     const loadRecommendationsAsync = async (isRefresh: boolean = false) => {
@@ -221,10 +240,14 @@ const Dashboard: React.FC = () => {
                 console.warn('좋아요 목록 불러오기 실패:', error);
             }
 
+            // 제한 알림 플래그 (중복 알림 방지)
+            let hasShownLimitAlert = false;
+            
             // Progressive Loading - 5개씩 단계별 로딩
-            const loadBatch = async (offset: number, limit: number) => {
+            const loadBatch = async (offset: number, limit: number, shouldRefresh: boolean = false) => {
                 try {
-                    const rec = await api.get(`/api/recommendations/user/${userId}?offset=${offset}&limit=${limit}`);
+                    const refreshParam = shouldRefresh ? '&refresh=true' : '';
+                    const rec = await api.get(`/api/recommendations/user/${userId}?offset=${offset}&limit=${limit}${refreshParam}`);
                     
                     // 서버 응답 헤더에서 새로고침 제한 정보 추출 (일일 + 시간당)
                     console.log('🔍 API 응답 헤더 디버깅:', rec.headers);
@@ -236,11 +259,12 @@ const Dashboard: React.FC = () => {
                         const hourlyRemaining = rec.headers['x-hourly-remaining'];
                         const hourlyMax = rec.headers['x-hourly-max'];
                         const resetDate = rec.headers['x-refresh-reset-date'];
+                        const limitExceeded = rec.headers['x-limit-exceeded'];
                         
                         console.log('📊 헤더값들:', {
                             dailyUsed, dailyRemaining, dailyMax,
                             hourlyUsed, hourlyRemaining, hourlyMax,
-                            resetDate
+                            resetDate, limitExceeded
                         });
                         
                         if (dailyUsed !== undefined && dailyRemaining !== undefined && 
@@ -267,21 +291,50 @@ const Dashboard: React.FC = () => {
                         console.log('❌ 응답 헤더가 없습니다');
                     }
                     
+                    // 제한 초과로 인한 빈 응답인지 확인
+                    if (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data)) {
+                        // 서버에서 {success: false, message: "...", recommendations: []} 형태로 응답할 때
+                        if (rec.data.success === false && rec.data.message) {
+                            console.log('🚫 새로고침 제한 초과:', rec.data.message);
+                            
+                            // 제한 초과 알림 표시 (중복 방지)
+                            if (isRefresh && !hasShownLimitAlert) {
+                                alert(`⏰ ${rec.data.message}`);
+                                setShowRefreshStatus(true);
+                                setTimeout(() => setShowRefreshStatus(false), 5000);
+                                hasShownLimitAlert = true;
+                            }
+                            
+                            return []; // 빈 배열 반환
+                        }
+                        return rec.data.recommendations || [];
+                    }
+                    
                     return Array.isArray(rec.data) ? rec.data : [];
-                } catch {
+                } catch (error) {
+                    console.error('배치 로딩 실패:', error);
                     return [];
                 }
             };
 
             let allRecs: Recommendation[] = [];
+            let limitExceeded = false;
             
-            // 첫 번째 배치 (즉시 표시)
-            const firstBatch = await loadBatch(0, 5);
+            // 첫 번째 배치 (새로고침일 때만 refresh=true 전송)
+            const firstBatch = await loadBatch(0, 5, isRefresh);
             allRecs = [...firstBatch];
             
-            // 두 번째 배치 (동기적으로 처리하여 8개 제한 보장)
-            const secondBatch = await loadBatch(5, 5);
-            allRecs = [...allRecs, ...secondBatch];
+            // 첫 번째 배치에서 제한 확인 - 제한이 걸리면 두 번째 배치 호출 안함
+            if (firstBatch.length === 0 && refreshLimits && 
+                (refreshLimits.daily.remaining <= 0 || refreshLimits.hourly.remaining <= 0)) {
+                limitExceeded = true;
+            }
+            
+            // 두 번째 배치 (제한이 없을 때만 호출, 항상 일반 조회)
+            if (!limitExceeded) {
+                const secondBatch = await loadBatch(5, 5, false); // 두 번째부터는 항상 일반 조회
+                allRecs = [...allRecs, ...secondBatch];
+            }
             
             // 중복 제거 및 필터링 (더미 데이터 사용 안함)
             const filteredRecs = allRecs.filter(track => !currentLikedTracks.has(track.id));
@@ -303,7 +356,7 @@ const Dashboard: React.FC = () => {
             
             // 캐시 저장
             if (finalRecs.length > 0) {
-                cacheRecommendations(finalRecs);
+                cacheRecommendations(userId, finalRecs);
             }
             
         } catch (error) {
@@ -413,7 +466,7 @@ const Dashboard: React.FC = () => {
             }
 
             // 캐시된 추천 음악 먼저 로드 (즉시 표시)
-            const hasCached = loadCachedRecommendations(false);
+            const hasCached = loadCachedRecommendations(userId, false);
             
             // 캐시가 없을 때만 서버에서 추천 음악 가져오기
             if (!hasCached) {
@@ -564,10 +617,8 @@ const Dashboard: React.FC = () => {
                 matchedUsers: 0,
                 favoriteGenres: ['장르 설정 필요'],
             });
-            // 전체 실패 시에도 캐시 시도 (더미 데이터 사용 안함)
-            if (!loadCachedRecommendations(false)) {
-                setRecommendations([]);
-            }
+            // 전체 실패 시 빈 배열로 설정 (캐시 없이)
+            setRecommendations([]);
         } finally {
             setLoading(false);
         }
@@ -692,12 +743,53 @@ const Dashboard: React.FC = () => {
                     {/* 서버 기반 새로고침 정보 */}
                     {refreshLimits && (
                         <div className="mb-4 text-center">
-                            <div className="inline-flex items-center space-x-4 bg-white/5 rounded-lg px-4 py-2 text-sm text-blue-200">
+                            <div className={`inline-flex items-center space-x-4 rounded-lg px-4 py-2 text-sm ${
+                                refreshLimits.daily.remaining <= 0 
+                                    ? 'bg-red-500/20 text-red-200' 
+                                    : refreshLimits.hourly.remaining <= 0 
+                                        ? 'bg-amber-500/20 text-amber-200'
+                                        : 'bg-white/5 text-blue-200'
+                            }`}>
                                 <span>📊 일일: {refreshLimits.daily.used}/{refreshLimits.daily.max}</span>
                                 <span>⏱️ 시간당: {refreshLimits.hourly.used}/{refreshLimits.hourly.max}</span>
                                 <span>🔄 남은 횟수: {Math.min(refreshLimits.daily.remaining, refreshLimits.hourly.remaining)}회</span>
-                                {refreshLimits.resetDate && (
-                                    <span>🕐 리셋: {new Date(refreshLimits.resetDate).toLocaleDateString()}</span>
+                                {refreshLimits.daily.remaining <= 0 ? (
+                                    <span className="font-semibold">📅 일일 제한 완료</span>
+                                ) : refreshLimits.hourly.remaining <= 0 ? (
+                                    <span className="font-semibold">🕐 1시간 후 새로고침 가능</span>
+                                ) : (
+                                    refreshLimits.resetDate && (
+                                        <span>🕐 리셋: {new Date(refreshLimits.resetDate).toLocaleDateString()}</span>
+                                    )
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 제한 초과 시 특별 메시지 */}
+                    {refreshLimits && (refreshLimits.daily.remaining <= 0 || refreshLimits.hourly.remaining <= 0) && (
+                        <div className="mb-6 text-center">
+                            <div className={`p-4 rounded-xl border-2 ${
+                                refreshLimits.daily.remaining <= 0 
+                                    ? 'bg-red-500/10 border-red-500/30 text-red-200'
+                                    : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                            }`}>
+                                <div className="flex items-center justify-center space-x-2 mb-2">
+                                    <AlertCircle className="w-5 h-5" />
+                                    <span className="font-semibold text-lg">
+                                        {refreshLimits.daily.remaining <= 0 ? '일일 새로고침 완료!' : '시간당 제한 도달!'}
+                                    </span>
+                                </div>
+                                <p className="text-sm opacity-90">
+                                    {refreshLimits.daily.remaining <= 0 
+                                        ? '오늘 할당된 추천 음악을 모두 받으셨습니다. 내일 다시 새로운 추천을 받아보세요!'
+                                        : '시간당 새로고침 한도에 도달했습니다. 1시간 후에 다시 시도해주세요!'
+                                    }
+                                </p>
+                                {refreshLimits.daily.remaining > 0 && refreshLimits.hourly.remaining <= 0 && (
+                                    <p className="text-xs mt-2 opacity-75">
+                                        💡 팁: 현재 표시된 추천 음악들을 즐겨보세요!
+                                    </p>
                                 )}
                             </div>
                         </div>
@@ -712,8 +804,30 @@ const Dashboard: React.FC = () => {
                         </div>
                     )}
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        {recommendations.map((track) => (
+                    {recommendations.length === 0 && !refreshLoading ? (
+                        <div className="text-center py-12">
+                            <div className="bg-white/5 rounded-xl p-8">
+                                <Music className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                                <h3 className="text-xl text-white mb-2">추천 음악이 없습니다</h3>
+                                <p className="text-gray-300 mb-4">
+                                    {refreshLimits && (refreshLimits.daily.remaining <= 0 || refreshLimits.hourly.remaining <= 0) 
+                                        ? '새로고침 제한으로 인해 새로운 추천을 받을 수 없습니다.'
+                                        : '프로필을 설정하거나 음악을 좋아요하면 더 나은 추천을 받을 수 있어요!'
+                                    }
+                                </p>
+                                {(!refreshLimits || (refreshLimits.daily.remaining > 0 && refreshLimits.hourly.remaining > 0)) && (
+                                    <button
+                                        onClick={handleRefresh}
+                                        className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors"
+                                    >
+                                        새로고침 시도
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            {recommendations.map((track) => (
                             <div
                                 key={track.id}
                                 className="bg-white/10 rounded-xl p-4 hover:bg-white/20 transition-all duration-300 cursor-pointer group"
@@ -772,7 +886,8 @@ const Dashboard: React.FC = () => {
                                 </div>
                             </div>
                         ))}
-                    </div>
+                        </div>
+                    )}
                 </div>
 
             </div>

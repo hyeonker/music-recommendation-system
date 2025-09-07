@@ -2,7 +2,9 @@ package com.example.musicrecommendation.web;
 
 import com.example.musicrecommendation.domain.ReviewReport;
 import com.example.musicrecommendation.domain.User;
+import com.example.musicrecommendation.domain.UserRecommendationActivity;
 import com.example.musicrecommendation.repository.ReviewReportRepository;
+import com.example.musicrecommendation.repository.UserRecommendationActivityRepository;
 import com.example.musicrecommendation.service.RecommendationLimitService;
 import com.example.musicrecommendation.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -20,8 +22,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -36,6 +40,7 @@ public class AdminController {
     private final ReviewReportRepository reviewReportRepository;
     private final UserService userService;
     private final RecommendationLimitService recommendationLimitService;
+    private final UserRecommendationActivityRepository activityRepository;
 
     /**
      * 통합 관리자 권한 확인 - OAuth2 + 로컬 로그인 지원
@@ -145,9 +150,9 @@ public class AdminController {
             Page<ReviewReport> reports;
             if (status != null && !status.isEmpty()) {
                 ReviewReport.ReportStatus reportStatus = ReviewReport.ReportStatus.valueOf(status.toUpperCase());
-                reports = reviewReportRepository.findByStatusOrderByCreatedAtDesc(reportStatus, pageable);
+                reports = reviewReportRepository.findByStatusWithReviewDetails(reportStatus, pageable);
             } else {
-                reports = reviewReportRepository.findAll(pageable);
+                reports = reviewReportRepository.findAllWithReviewDetails(pageable);
             }
 
             return ResponseEntity.ok(reports);
@@ -291,6 +296,65 @@ public class AdminController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                 "success", false,
                 "message", "일일 제한 리셋 중 오류가 발생했습니다."
+            ));
+        }
+    }
+
+    /**
+     * 모든 사용자의 새로고침 제한 초기화 (관리자용) - 테스트를 위한 엔드포인트
+     */
+    @PostMapping("/reset-all-limits")
+    @Transactional
+    public ResponseEntity<?> resetAllUserLimits(
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
+        
+        if (!isAdminUnified(oauth2User, request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "success", false,
+                "message", "관리자 권한이 필요합니다."
+            ));
+        }
+        
+        try {
+            log.info("=== 모든 사용자 새로고침 제한 초기화 시작 ===");
+            
+            // 1. 모든 활동 레코드 조회
+            List<UserRecommendationActivity> allActivities = activityRepository.findAll();
+            log.info("총 {} 개의 활동 레코드 발견", allActivities.size());
+            
+            // 2. 각 활동 레코드의 카운트를 0으로 초기화
+            int updatedCount = 0;
+            for (UserRecommendationActivity activity : allActivities) {
+                if (activity.getRefreshCount() > 0 || 
+                    (activity.getHourlyCount() != null && activity.getHourlyCount() > 0)) {
+                    
+                    activity.setRefreshCount(0);
+                    activity.setHourlyCount(0);
+                    activity.setLastRefreshAt(null);
+                    activity.setLastHourlyReset(null);
+                    
+                    activityRepository.save(activity);
+                    updatedCount++;
+                    
+                    log.debug("사용자 {} 제한 초기화 완료", activity.getUserId());
+                }
+            }
+            
+            log.info("=== 새로고침 제한 초기화 완료: {} 사용자 업데이트 ===", updatedCount);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "모든 사용자의 새로고침 제한이 초기화되었습니다.",
+                "totalRecords", allActivities.size(),
+                "updatedUsers", updatedCount
+            ));
+            
+        } catch (Exception e) {
+            log.error("모든 사용자 제한 초기화 중 오류: ", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "success", false,
+                "message", "제한 초기화 중 오류가 발생했습니다: " + e.getMessage()
             ));
         }
     }

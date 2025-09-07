@@ -39,9 +39,10 @@ public class UserBadgeController {
     
     @GetMapping("/my")
     public ResponseEntity<List<BadgeDto.Response>> getMyBadges(
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            jakarta.servlet.http.HttpServletRequest request) {
         
-        Long userId = getUserId(oauth2User);
+        Long userId = getUserId(oauth2User, request);
         
         var badges = badgeService.getUserBadges(userId)
                 .stream()
@@ -178,31 +179,33 @@ public class UserBadgeController {
     
     @GetMapping("/all")
     public ResponseEntity<BadgeDto.AllBadgesResponse> getAllBadgesWithProgress(
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            jakarta.servlet.http.HttpServletRequest request) {
         
         log.info("🔍 /api/badges/all 호출됨 - OAuth2User: {}", oauth2User != null ? "존재" : "null");
         
-        if (oauth2User == null) {
-            log.warn("❌ 인증되지 않은 사용자가 전체 배지 목록 접근 시도");
+        try {
+            Long userId = getUserId(oauth2User, request);
+            log.info("✅ 사용자 ID 추출 완료: {}", userId);
+            
+            var allBadgesWithProgress = badgeService.getAllBadgesWithProgress(userId);
+            log.info("✅ 전체 배지 데이터 조회 완료 - 배지 개수: {}", allBadgesWithProgress.getBadges().size());
+            
+            return ResponseEntity.ok(allBadgesWithProgress);
+            
+        } catch (Exception e) {
+            log.warn("❌ 인증되지 않은 사용자가 전체 배지 목록 접근 시도: {}", e.getMessage());
             return ResponseEntity.status(401).build();
         }
-        
-        log.info("✅ 인증된 사용자로 전체 배지 목록 요청 처리 시작");
-        Long userId = getUserId(oauth2User);
-        log.info("✅ 사용자 ID 추출 완료: {}", userId);
-        
-        var allBadgesWithProgress = badgeService.getAllBadgesWithProgress(userId);
-        log.info("✅ 전체 배지 데이터 조회 완료 - 배지 개수: {}", allBadgesWithProgress.getBadges().size());
-        
-        return ResponseEntity.ok(allBadgesWithProgress);
     }
     
     @PostMapping("/representative")
     public ResponseEntity<String> setRepresentativeBadge(
             @AuthenticationPrincipal OAuth2User oauth2User,
+            jakarta.servlet.http.HttpServletRequest httpRequest,
             @RequestBody SetRepresentativeBadgeRequest request) {
         
-        Long userId = getUserId(oauth2User);
+        Long userId = getUserId(oauth2User, httpRequest);
         
         // 해당 사용자가 실제로 그 배지를 보유하고 있는지 확인
         if (!badgeService.hasBadgeById(userId, request.getBadgeId())) {
@@ -215,9 +218,10 @@ public class UserBadgeController {
     
     @DeleteMapping("/representative")
     public ResponseEntity<String> removeRepresentativeBadge(
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            jakarta.servlet.http.HttpServletRequest request) {
         
-        Long userId = getUserId(oauth2User);
+        Long userId = getUserId(oauth2User, request);
         badgeService.setRepresentativeBadge(userId, null);
         return ResponseEntity.ok("대표 배지가 해제되었습니다.");
     }
@@ -344,6 +348,34 @@ public class UserBadgeController {
         
         public java.time.OffsetDateTime getExpiresAt() { return expiresAt; }
         public void setExpiresAt(java.time.OffsetDateTime expiresAt) { this.expiresAt = expiresAt; }
+    }
+
+    // OAuth2User와 HttpServletRequest 모두를 지원하는 getUserId 메서드 (LOCAL 사용자 지원)
+    private Long getUserId(OAuth2User oauth2User, jakarta.servlet.http.HttpServletRequest request) {
+        // OAuth2User가 있으면 OAuth2 방식으로 처리
+        if (oauth2User != null) {
+            return getUserId(oauth2User);
+        }
+        
+        // OAuth2User가 null이면 LOCAL 세션에서 사용자 ID 추출
+        log.info("=== LOCAL 사용자 세션 확인 시작 ===");
+        jakarta.servlet.http.HttpSession session = request.getSession(false);
+        
+        if (session == null) {
+            log.warn("❌ 세션이 존재하지 않습니다");
+            throw new IllegalArgumentException("인증되지 않은 사용자입니다.");
+        }
+        
+        Long userId = (Long) session.getAttribute("userId");
+        log.info("세션에서 추출한 userId: {}", userId);
+        
+        if (userId == null) {
+            log.warn("❌ 세션에 userId가 없습니다");
+            throw new IllegalArgumentException("인증되지 않은 사용자입니다.");
+        }
+        
+        log.info("✅ LOCAL 사용자 인증 성공 - userId: {}", userId);
+        return userId;
     }
 
     private Long getUserId(OAuth2User oauth2User) {

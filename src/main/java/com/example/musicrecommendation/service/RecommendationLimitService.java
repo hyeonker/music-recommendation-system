@@ -69,14 +69,59 @@ public class RecommendationLimitService {
         }
     }
     
+    /**
+     * 제한 상태만 확인 (카운트 증가 없음)
+     */
+    @Transactional(readOnly = true)
+    public RefreshLimitResult checkLimitOnly(Long userId) {
+        try {
+            LocalDate today = LocalDate.now();
+            UserRecommendationActivity activity = getOrCreateTodayActivity(userId, today);
+            
+            // 제한 상태만 확인
+            int dailyLimit = properties.getDailyRefreshLimit();
+            int hourlyLimit = 3; // 시간당 3회 제한
+            
+            return RefreshLimitResult.builder()
+                .success(true)
+                .currentCount(activity.getRefreshCount())
+                .remainingCount(activity.getRemainingRefreshCount(dailyLimit))
+                .maxCount(dailyLimit)
+                .hourlyUsed(activity.getCurrentHourlyCount())
+                .hourlyRemaining(activity.getRemainingHourlyRefreshCount(hourlyLimit))
+                .hourlyMax(hourlyLimit)
+                .resetDate(today.plusDays(1))
+                .message("제한 상태 조회")
+                .build();
+                
+        } catch (Exception e) {
+            log.error("제한 상태 확인 실패 (userId: {}): {}", userId, e.getMessage());
+            
+            // 에러 시 기본값 반환
+            return RefreshLimitResult.builder()
+                .success(true)
+                .currentCount(0)
+                .remainingCount(properties.getDailyRefreshLimit())
+                .maxCount(properties.getDailyRefreshLimit())
+                .hourlyUsed(0)
+                .hourlyRemaining(3)
+                .hourlyMax(3)
+                .resetDate(LocalDate.now().plusDays(1))
+                .message("제한 확인 실패 - 기본값")
+                .build();
+        }
+    }
+
     @Transactional
     public RefreshLimitResult checkAndIncrementRefreshCount(Long userId) {
         try {
             LocalDate today = LocalDate.now();
             UserRecommendationActivity activity = getOrCreateTodayActivity(userId, today);
             
-            // 제한 확인
+            // 일일 제한 확인
             int dailyLimit = properties.getDailyRefreshLimit();
+            int hourlyLimit = 3; // 시간당 3회 제한
+            
             if (activity.isLimitExceeded(dailyLimit)) {
                 log.info("사용자 {}의 일일 새로고침 제한 초과 (현재: {}, 제한: {})", 
                     userId, activity.getRefreshCount(), dailyLimit);
@@ -86,26 +131,51 @@ public class RecommendationLimitService {
                     .currentCount(activity.getRefreshCount())
                     .remainingCount(0)
                     .maxCount(dailyLimit)
+                    .hourlyUsed(activity.getCurrentHourlyCount())
+                    .hourlyRemaining(activity.getRemainingHourlyRefreshCount(hourlyLimit))
+                    .hourlyMax(hourlyLimit)
                     .resetDate(today.plusDays(1))
                     .message("일일 새로고침 제한에 도달했습니다")
                     .build();
             }
             
-            // 카운트 증가
+            // 시간당 제한 확인
+            if (activity.isHourlyLimitExceeded(hourlyLimit)) {
+                log.info("사용자 {}의 시간당 새로고침 제한 초과 (현재: {}, 제한: {})", 
+                    userId, activity.getCurrentHourlyCount(), hourlyLimit);
+                
+                return RefreshLimitResult.builder()
+                    .success(false)
+                    .currentCount(activity.getRefreshCount())
+                    .remainingCount(activity.getRemainingRefreshCount(dailyLimit))
+                    .maxCount(dailyLimit)
+                    .hourlyUsed(activity.getCurrentHourlyCount())
+                    .hourlyRemaining(0)
+                    .hourlyMax(hourlyLimit)
+                    .resetDate(today.plusDays(1))
+                    .message("시간당 새로고침 제한에 도달했습니다. 1시간 후에 다시 시도해주세요.")
+                    .build();
+            }
+            
+            // 카운트 증가 (일일 및 시간당)
             activity.incrementRefreshCount();
             activityRepository.save(activity);
             
             // 캐시 무효화 (다음 조회 시 최신 데이터 반영)
             evictUserActivityCache(userId, today);
             
-            log.debug("사용자 {} 새로고침 카운트 증가: {}/{}", 
-                userId, activity.getRefreshCount(), dailyLimit);
+            log.debug("사용자 {} 새로고침 카운트 증가: 일일 {}/{}, 시간당 {}/{}", 
+                userId, activity.getRefreshCount(), dailyLimit, 
+                activity.getCurrentHourlyCount(), hourlyLimit);
             
             return RefreshLimitResult.builder()
                 .success(true)
                 .currentCount(activity.getRefreshCount())
                 .remainingCount(activity.getRemainingRefreshCount(dailyLimit))
                 .maxCount(dailyLimit)
+                .hourlyUsed(activity.getCurrentHourlyCount())
+                .hourlyRemaining(activity.getRemainingHourlyRefreshCount(hourlyLimit))
+                .hourlyMax(hourlyLimit)
                 .resetDate(today.plusDays(1))
                 .message("새로고침 성공")
                 .build();
@@ -119,6 +189,9 @@ public class RecommendationLimitService {
                 .currentCount(0)
                 .remainingCount(properties.getDailyRefreshLimit())
                 .maxCount(properties.getDailyRefreshLimit())
+                .hourlyUsed(0)
+                .hourlyRemaining(3)
+                .hourlyMax(3)
                 .resetDate(LocalDate.now().plusDays(1))
                 .message("제한 확인 실패 - 기본 허용")
                 .build();
@@ -196,15 +269,22 @@ public class RecommendationLimitService {
         private final int currentCount;
         private final int remainingCount;
         private final int maxCount;
+        private final int hourlyUsed;
+        private final int hourlyRemaining;
+        private final int hourlyMax;
         private final LocalDate resetDate;
         private final String message;
         
         public RefreshLimitResult(boolean success, int currentCount, int remainingCount, 
-                                int maxCount, LocalDate resetDate, String message) {
+                                int maxCount, int hourlyUsed, int hourlyRemaining, int hourlyMax,
+                                LocalDate resetDate, String message) {
             this.success = success;
             this.currentCount = currentCount;
             this.remainingCount = remainingCount;
             this.maxCount = maxCount;
+            this.hourlyUsed = hourlyUsed;
+            this.hourlyRemaining = hourlyRemaining;
+            this.hourlyMax = hourlyMax;
             this.resetDate = resetDate;
             this.message = message;
         }
@@ -218,6 +298,9 @@ public class RecommendationLimitService {
         public int getCurrentCount() { return currentCount; }
         public int getRemainingCount() { return remainingCount; }
         public int getMaxCount() { return maxCount; }
+        public int getHourlyUsed() { return hourlyUsed; }
+        public int getHourlyRemaining() { return hourlyRemaining; }
+        public int getHourlyMax() { return hourlyMax; }
         public LocalDate getResetDate() { return resetDate; }
         public String getMessage() { return message; }
         
@@ -227,6 +310,9 @@ public class RecommendationLimitService {
                 "currentCount", currentCount,
                 "remainingCount", remainingCount,
                 "maxCount", maxCount,
+                "hourlyUsed", hourlyUsed,
+                "hourlyRemaining", hourlyRemaining,
+                "hourlyMax", hourlyMax,
                 "resetDate", resetDate.toString(),
                 "message", message
             );
@@ -237,6 +323,9 @@ public class RecommendationLimitService {
             private int currentCount;
             private int remainingCount;
             private int maxCount;
+            private int hourlyUsed;
+            private int hourlyRemaining;
+            private int hourlyMax;
             private LocalDate resetDate;
             private String message;
             
@@ -260,6 +349,21 @@ public class RecommendationLimitService {
                 return this;
             }
             
+            public RefreshLimitResultBuilder hourlyUsed(int hourlyUsed) {
+                this.hourlyUsed = hourlyUsed;
+                return this;
+            }
+            
+            public RefreshLimitResultBuilder hourlyRemaining(int hourlyRemaining) {
+                this.hourlyRemaining = hourlyRemaining;
+                return this;
+            }
+            
+            public RefreshLimitResultBuilder hourlyMax(int hourlyMax) {
+                this.hourlyMax = hourlyMax;
+                return this;
+            }
+            
             public RefreshLimitResultBuilder resetDate(LocalDate resetDate) {
                 this.resetDate = resetDate;
                 return this;
@@ -272,7 +376,8 @@ public class RecommendationLimitService {
             
             public RefreshLimitResult build() {
                 return new RefreshLimitResult(success, currentCount, remainingCount, 
-                                           maxCount, resetDate, message);
+                                           maxCount, hourlyUsed, hourlyRemaining, hourlyMax, 
+                                           resetDate, message);
             }
         }
     }

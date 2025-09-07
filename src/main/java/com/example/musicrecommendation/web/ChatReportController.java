@@ -97,6 +97,9 @@ public class ChatReportController {
             
             if (extractedEmail != null) {
                 return userService
+
+
+
                         .findUserByEmail(extractedEmail)
                     .map(user -> user.getId())
                     .orElse(null);

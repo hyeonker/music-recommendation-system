@@ -193,6 +193,11 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
           tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0),
         };
 
+        console.log('=== 리뷰 수정 요청 시작 ===');
+        console.log('reviewId:', initialData?.reviewId);
+        console.log('updateData:', updateData);
+        console.log('URL:', `/api/reviews/${initialData?.reviewId}`);
+
         const response = await fetch(`/api/reviews/${initialData?.reviewId}`, {
           method: 'PUT',
           headers: {
@@ -202,9 +207,16 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
           body: JSON.stringify(updateData),
         });
 
+        console.log('응답 상태:', response.status);
+        console.log('응답 OK:', response.ok);
+
         if (response.ok) {
+          const result = await response.json();
+          console.log('수정 성공 응답:', result);
           onSuccess?.();
         } else {
+          const errorText = await response.text();
+          console.error('수정 실패 응답:', errorText);
           alert('리뷰 수정에 실패했습니다.');
         }
       } catch (error) {
@@ -260,8 +272,7 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white/20 shadow-2xl">
+      <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white/20 shadow-2xl">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-white">
             {isEditMode ? '리뷰 수정' : '음악 리뷰 작성'}
@@ -662,7 +673,6 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
           </div>
         </form>
       </div>
-    </div>
   );
 };
 

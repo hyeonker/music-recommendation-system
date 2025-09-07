@@ -238,13 +238,27 @@ public class UserService {
      * @return 중복되면 true, 없으면 false
      */
     public boolean isNameExistsExcludingUser(String name, Long excludeUserId) {
-        // 먼저 닉네임 유효성 검사
-        validateName(name, excludeUserId);
+        // 기본적인 null/empty 체크만 수행 (상세 유효성 검사는 별도로)
+        if (name == null || name.trim().isEmpty()) {
+            return false; // 빈 이름은 중복이 아니라 유효하지 않은 이름
+        }
+        
+        String trimmedName = name.trim();
         
         if (excludeUserId == null) {
-            return userRepository.existsByName(name);
+            return userRepository.existsByName(trimmedName);
         }
-        return userRepository.existsByNameAndIdNot(name, excludeUserId);
+        return userRepository.existsByNameAndIdNot(trimmedName, excludeUserId);
+    }
+    
+    /**
+     * 닉네임 유효성 검사만 수행 (중복 체크와 분리)
+     *
+     * @param name 확인할 닉네임
+     * @param excludeUserId 제외할 사용자 ID (관리자는 예외)
+     */
+    public void validateNameOnly(String name, Long excludeUserId) {
+        validateName(name, excludeUserId);
     }
     
     /**

@@ -227,17 +227,33 @@ public class UserController {
     public ResponseEntity<Map<String, Object>> checkNameExists(
             @Parameter(description = "확인할 닉네임", example = "뮤직러버")
             @PathVariable String name,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
         
         try {
             // 현재 사용자의 ID를 가져오기
             Long currentUserId = null;
+            
+            // 1. OAuth2 로그인 확인
             if (oauth2User != null) {
                 String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
                 if (email != null) {
                     currentUserId = userService.findUserByEmail(email)
                             .map(User::getId)
                             .orElse(null);
+                }
+            }
+            
+            // 2. 로컬 로그인 확인 (OAuth2가 없을 경우)
+            if (currentUserId == null) {
+                HttpSession session = request.getSession(false);
+                if (session != null) {
+                    Long sessionUserId = (Long) session.getAttribute("userId");
+                    String authProvider = (String) session.getAttribute("authProvider");
+                    
+                    if (sessionUserId != null && "LOCAL".equals(authProvider)) {
+                        currentUserId = sessionUserId;
+                    }
                 }
             }
             
@@ -300,43 +316,115 @@ public class UserController {
      */
     @PutMapping("/me")
     @Operation(summary = "내 정보 수정", description = "현재 로그인한 사용자의 이름을 수정합니다.")
-    public ResponseEntity<UserResponse> updateMyInfo(
+    public ResponseEntity<?> updateMyInfo(
             @RequestBody Map<String, String> request,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
-        
-        if (oauth2User == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
-        
-        String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
-        if (email == null) {
-            return ResponseEntity.badRequest().build();
-        }
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest httpRequest) {
         
         String newName = request.get("name");
         if (newName == null || newName.trim().isEmpty()) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "이름을 입력해주세요",
+                "code", "MISSING_NAME"
+            ));
         }
         
+        // 1. OAuth2 로그인 확인
+        if (oauth2User != null) {
+            String email = extractEmailFromOAuth2User(oauth2User.getAttributes());
+            if (email != null) {
+                return updateUserByEmail(email, newName.trim());
+            }
+        }
+        
+        // 2. 로컬 로그인 확인
+        HttpSession session = httpRequest.getSession(false);
+        if (session != null) {
+            Long userId = (Long) session.getAttribute("userId");
+            String authProvider = (String) session.getAttribute("authProvider");
+            
+            if (userId != null && "LOCAL".equals(authProvider)) {
+                return updateUserById(userId, newName.trim());
+            }
+        }
+        
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+            "error", "로그인이 필요합니다",
+            "code", "NOT_AUTHENTICATED"
+        ));
+    }
+    
+    private ResponseEntity<?> updateUserByEmail(String email, String newName) {
         try {
             User user = userService.findUserByEmail(email)
                     .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다"));
             
-            // 운영자가 아닌 경우에만 닉네임 중복 체크 (자신은 제외)
-            if (!userService.isAdmin(user.getId()) && userService.isNameExistsExcludingUser(newName.trim(), user.getId())) {
-                return ResponseEntity.badRequest().build();
+            // 1. 먼저 닉네임 유효성 검사 (길이, 형식, 금지단어 등)
+            userService.validateNameOnly(newName, user.getId());
+            
+            // 2. 운영자가 아닌 경우에만 닉네임 중복 체크 (자신은 제외)
+            if (!userService.isAdmin(user.getId()) && userService.isNameExistsExcludingUser(newName, user.getId())) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "error", "이미 사용 중인 닉네임입니다",
+                    "code", "DUPLICATE_NAME"
+                ));
             }
                     
             User updatedUser = userService.updateUserProfile(
                     user.getId(),
-                    newName.trim(),
+                    newName,
                     user.getProfileImageUrl()
             );
             
             return ResponseEntity.ok(UserResponse.from(updatedUser));
             
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", e.getMessage(),
+                "code", "VALIDATION_ERROR"
+            ));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", "서버 오류가 발생했습니다",
+                "code", "INTERNAL_ERROR"
+            ));
+        }
+    }
+    
+    private ResponseEntity<?> updateUserById(Long userId, String newName) {
+        try {
+            User user = userService.findUserById(userId)
+                    .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다"));
+            
+            // 1. 먼저 닉네임 유효성 검사 (길이, 형식, 금지단어 등)
+            userService.validateNameOnly(newName, user.getId());
+            
+            // 2. 운영자가 아닌 경우에만 닉네임 중복 체크 (자신은 제외)
+            if (!userService.isAdmin(user.getId()) && userService.isNameExistsExcludingUser(newName, user.getId())) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "error", "이미 사용 중인 닉네임입니다",
+                    "code", "DUPLICATE_NAME"
+                ));
+            }
+                    
+            User updatedUser = userService.updateUserProfile(
+                    user.getId(),
+                    newName,
+                    user.getProfileImageUrl()
+            );
+            
+            return ResponseEntity.ok(UserResponse.from(updatedUser));
+            
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", e.getMessage(),
+                "code", "VALIDATION_ERROR"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                "error", "서버 오류가 발생했습니다",
+                "code", "INTERNAL_ERROR"
+            ));
         }
     }
     

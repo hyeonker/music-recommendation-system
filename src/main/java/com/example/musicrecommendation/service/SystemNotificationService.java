@@ -30,6 +30,8 @@ public class SystemNotificationService {
     private final BadgeNotificationService badgeNotificationService;
     private final ObjectMapper objectMapper;
     
+    private static final TypeReference<List<Long>> USER_ID_LIST_TYPE_REF = new TypeReference<List<Long>>() {};
+    
     /**
      * 시스템 알림 생성 및 발송
      */
@@ -210,7 +212,7 @@ public class SystemNotificationService {
             try {
                 List<Long> userIds = objectMapper.readValue(
                     notification.getTargetUserIds(), 
-                    new TypeReference<List<Long>>() {}
+                    USER_ID_LIST_TYPE_REF
                 );
                 List<User> specificUsers = userRepository.findAllById(userIds);
                 log.info("🎯 특정 사용자 대상 - 요청 ID: {}, 실제 조회: {}명", userIds, specificUsers.size());

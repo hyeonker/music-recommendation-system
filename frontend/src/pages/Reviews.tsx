@@ -90,18 +90,64 @@ const Reviews: React.FC = () => {
   }, [currentPage]);
 
   useEffect(() => {
-    // 현재 로그인한 사용자 정보 가져오기
+    // 현재 로그인한 사용자 정보 가져오기 (OAuth2 및 LOCAL 사용자 모두 지원)
     const fetchCurrentUser = async () => {
       try {
-        const response = await fetch('http://localhost:9090/api/auth/me', {
-          credentials: 'include'
-        });
-        const data = await response.json();
-        if (data.authenticated && data.user) {
-          setCurrentUserId(data.user.id);
+        console.log('=== Reviews 현재 사용자 정보 조회 시작 ===');
+        
+        let userId: number | null = null;
+        
+        // 먼저 OAuth2 사용자 확인
+        try {
+          const response = await fetch('http://localhost:9090/api/auth/me', {
+            credentials: 'include'
+          });
+          
+          // HTML 응답이 아닌 경우만 처리
+          const contentType = response.headers.get('content-type');
+          if (response.ok && contentType && contentType.includes('application/json')) {
+            const data = await response.json();
+            console.log('OAuth2 사용자 인증 성공:', data);
+            if (data.authenticated && data.user) {
+              userId = data.user.id;
+              console.log('OAuth2 사용자 ID 설정:', userId);
+            }
+          }
+        } catch (error) {
+          console.log('OAuth2 인증 확인 실패:', error);
+        }
+        
+        // OAuth2 인증이 실패했으면 LOCAL 사용자 확인
+        if (!userId) {
+          try {
+            const response = await fetch('http://localhost:9090/api/auth/local/me', {
+              credentials: 'include'
+            });
+            
+            const contentType = response.headers.get('content-type');
+            if (response.ok && contentType && contentType.includes('application/json')) {
+              const data = await response.json();
+              console.log('LOCAL 사용자 인증 응답:', data);
+              if (data.success && data.user) {
+                userId = data.user.id;
+                console.log('LOCAL 사용자 ID 설정:', userId);
+              }
+            }
+          } catch (error) {
+            console.log('LOCAL 인증 확인 실패:', error);
+          }
+        }
+        
+        if (userId) {
+          setCurrentUserId(userId);
+          console.log('✅ 최종 사용자 ID 설정:', userId);
+        } else {
+          console.warn('❌ 사용자 인증 실패 - currentUserId가 null로 설정됨');
+          setCurrentUserId(null);
         }
       } catch (error) {
         console.error('현재 사용자 정보를 가져올 수 없습니다:', error);
+        setCurrentUserId(null);
       }
     };
     
@@ -147,25 +193,49 @@ const Reviews: React.FC = () => {
           break;
         case 'my-badges':
           // 획득한 배지 로드
-          data = await fetch('http://localhost:9090/api/badges/my', {
-            credentials: 'include'
-          }).then(r => r.json());
-          setBadges(data || []);
+          try {
+            const badgeResponse = await fetch('http://localhost:9090/api/badges/my', {
+              credentials: 'include'
+            });
+            
+            const contentType = badgeResponse.headers.get('content-type');
+            if (badgeResponse.ok && contentType && contentType.includes('application/json')) {
+              const badgeData = await badgeResponse.json();
+              setBadges(Array.isArray(badgeData) ? badgeData : []);
+              console.log('내 배지 로드 성공:', badgeData);
+            } else {
+              console.warn('배지 API 응답이 JSON이 아님 또는 실패:', badgeResponse.status);
+              setBadges([]);
+            }
+          } catch (error) {
+            console.error('내 배지 로드 오류:', error);
+            setBadges([]);
+          }
           
           // 전체 배지 데이터 로드 (진행률 포함)
           try {
             const allBadgesResponse = await fetch('http://localhost:9090/api/badges/all', {
               credentials: 'include'
             });
-            if (allBadgesResponse.ok) {
+            
+            const allBadgesContentType = allBadgesResponse.headers.get('content-type');
+            if (allBadgesResponse.ok && allBadgesContentType && allBadgesContentType.includes('application/json')) {
               const allBadgesData = await allBadgesResponse.json();
               console.log('=== 전체 배지 데이터 로드 성공 ===', allBadgesData);
-              setAllBadgesData(allBadgesData);
+              // 전체 배지 데이터가 올바른 구조인지 확인
+              if (allBadgesData && Array.isArray(allBadgesData.badges)) {
+                setAllBadgesData(allBadgesData);
+              } else {
+                console.warn('전체 배지 데이터가 예상 구조와 다름:', allBadgesData);
+                setAllBadgesData(null);
+              }
             } else {
-              console.error('전체 배지 API 응답 오류:', allBadgesResponse.status, allBadgesResponse.statusText);
+              console.warn('전체 배지 API 응답이 JSON이 아님 또는 실패:', allBadgesResponse.status);
+              setAllBadgesData(null);
             }
           } catch (error) {
             console.error('전체 배지 데이터 로드 오류:', error);
+            setAllBadgesData(null);
           }
           
           // 현재 설정된 대표 배지 ID 가져오기 (currentUserId가 있을 때만)
@@ -214,7 +284,16 @@ const Reviews: React.FC = () => {
       });
       
       console.log('응답 상태:', response.status);
-      console.log('응답 헤더:', response.headers);
+      console.log('Content-Type:', response.headers.get('content-type'));
+      
+      // HTML 응답인지 확인 (로그인 페이지로 리다이렉트된 경우)
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('HTML 응답 받음 - 로그인 필요');
+        alert('로그인이 필요합니다. 다시 로그인해주세요.');
+        window.location.href = '/login';
+        return;
+      }
       
       if (response.ok) {
         console.log('도움이 됨 성공');
@@ -226,8 +305,6 @@ const Reviews: React.FC = () => {
               : review
           )
         );
-        // 추가로 서버에서 최신 데이터도 가져오기
-        loadReviews();
       } else if (response.status === 400) {
         console.log('이미 도움이 됨을 눌렀습니다');
         alert('이미 이 리뷰를 도움이 됨으로 표시했습니다.');
@@ -276,21 +353,33 @@ const Reviews: React.FC = () => {
         body: JSON.stringify(reviewData)
       });
 
+      // HTML 응답인지 확인 (로그인 페이지로 리다이렉트된 경우)
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('리뷰 등록 - HTML 응답 받음, 로그인 필요');
+        alert('로그인이 필요합니다. 다시 로그인해주세요.');
+        window.location.href = '/login';
+        return;
+      }
+
       if (response.ok) {
         setShowReviewForm(false);
-        setActiveTab('my-reviews'); // 리뷰 작성 후 "내 리뷰" 탭으로 이동
-        setCurrentPage(0); // 첫 페이지로 이동
+        alert('리뷰가 성공적으로 등록되었습니다!');
         
-        // 잠시 기다린 후 새로고침 (DB 반영 시간 고려)
+        // 리뷰 작성 후 "내 리뷰" 탭으로 이동하고 첫 페이지로 이동
+        setActiveTab('my-reviews');
+        setCurrentPage(0);
+        
+        // 상태 변경이 완료된 후 리뷰 다시 로드
         setTimeout(() => {
           loadReviews();
-        }, 500);
-        
-        alert('리뷰가 성공적으로 등록되었습니다!');
+        }, 100);
       } else if (response.status === 409) {
         alert('이미 이 곡에 대한 리뷰를 작성하셨습니다. 기존 리뷰를 수정하거나 삭제 후 다시 작성해주세요.');
       } else {
-        alert('리뷰 등록에 실패했습니다.');
+        const errorText = await response.text();
+        console.error('리뷰 등록 실패:', response.status, errorText);
+        alert(`리뷰 등록에 실패했습니다. (${response.status})`);
       }
     } catch (error) {
       console.error('Failed to create review:', error);

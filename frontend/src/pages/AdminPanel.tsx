@@ -12,6 +12,22 @@ interface ReviewReport {
   createdAt: string;
   resolvedAt?: string;
   resolvedByUserId?: number;
+  review?: {
+    id: number;
+    reviewText: string;
+    rating: number;
+    user: {
+      id: number;
+      name: string;
+      nickname?: string;
+    };
+    musicItem: {
+      id: number;
+      name: string;
+      artistName: string;
+      albumName?: string;
+    };
+  };
 }
 
 interface ReportStats {
@@ -461,7 +477,7 @@ const AdminPanel: React.FC = () => {
                   <thead className="bg-white/20">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-blue-200 uppercase tracking-wider">신고 ID</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-blue-200 uppercase tracking-wider">리뷰 ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-blue-200 uppercase tracking-wider">리뷰 정보</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-blue-200 uppercase tracking-wider">신고 사유</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-blue-200 uppercase tracking-wider">상태</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-blue-200 uppercase tracking-wider">신고일</th>
@@ -481,7 +497,21 @@ const AdminPanel: React.FC = () => {
                       reports.map((report) => (
                         <tr key={report.id} className="hover:bg-white/5">
                           <td className="px-6 py-4 text-white">{report.id}</td>
-                          <td className="px-6 py-4 text-white">{report.reviewId}</td>
+                          <td className="px-6 py-4 text-white">
+                            <div>
+                              <div className="font-medium text-sm">
+                                {report.review?.user?.name || '알 수 없는 사용자'}
+                              </div>
+                              <div className="text-blue-200 text-xs mt-1 line-clamp-2">
+                                {report.review?.reviewText || '리뷰 내용 없음'}
+                              </div>
+                              <div className="text-purple-300 text-xs mt-1">
+                                {report.review?.musicItem?.name && report.review?.musicItem?.artistName 
+                                  ? `${report.review.musicItem.name} - ${report.review.musicItem.artistName}` 
+                                  : '곡 정보 없음'}
+                              </div>
+                            </div>
+                          </td>
                           <td className="px-6 py-4 text-white">
                             <div>
                               <div className="font-medium">{report.reason}</div>

@@ -17,6 +17,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
@@ -34,9 +36,10 @@ public class MusicReviewController {
     @PostMapping
     public ResponseEntity<ReviewDto.Response> createReview(
             @Valid @RequestBody ReviewDto.CreateRequest request,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest servletRequest) {
         
-        Long userId = getUserId(oauth2User);
+        Long userId = getUserId(oauth2User, servletRequest);
         log.info("리뷰 생성 요청 수신 - 사용자: {}, 곡명: '{}', 아티스트: '{}', externalId: '{}', itemType: {}", 
                 userId, request.getMusicName(), request.getArtistName(), request.getExternalId(), request.getItemType());
         
@@ -72,9 +75,16 @@ public class MusicReviewController {
     public ResponseEntity<ReviewDto.Response> updateReview(
             @PathVariable Long reviewId,
             @Valid @RequestBody ReviewDto.UpdateRequest request,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest servletRequest) {
         
-        Long userId = getUserId(oauth2User);
+        Long userId = getUserId(oauth2User, servletRequest);
+        
+        log.info("=== 리뷰 수정 요청 ===");
+        log.info("reviewId: {}", reviewId);
+        log.info("userId: {}", userId);
+        log.info("request: rating={}, reviewText={}, tags={}", 
+            request.getRating(), request.getReviewText(), request.getTags());
         
         try {
             var review = reviewService.updateReview(
@@ -84,6 +94,8 @@ public class MusicReviewController {
                 request.getReviewText(),
                 request.getTags()
             );
+            
+            log.info("리뷰 수정 성공: reviewId={}, userId={}", reviewId, userId);
             
             ReviewDto.Response response = ReviewDto.Response.from(review);
             return ResponseEntity.ok(response);
@@ -98,9 +110,10 @@ public class MusicReviewController {
     @DeleteMapping("/{reviewId}")
     public ResponseEntity<Void> deleteReview(
             @PathVariable Long reviewId,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
         
-        Long userId = getUserId(oauth2User);
+        Long userId = getUserId(oauth2User, request);
         
         try {
             reviewService.deleteReview(reviewId, userId);
@@ -110,6 +123,45 @@ public class MusicReviewController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+    }
+    
+    @DeleteMapping("/{reviewId}/admin")
+    public ResponseEntity<Map<String, Object>> deleteReviewAsAdmin(
+            @PathVariable Long reviewId,
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest request) {
+        
+        try {
+            Long userId = getUserId(oauth2User, request);
+            
+            // 관리자 권한 확인
+            if (!userService.isAdmin(userId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "success", false,
+                    "message", "관리자 권한이 필요합니다."
+                ));
+            }
+            
+            // 관리자는 모든 리뷰를 삭제할 수 있음 (작성자 확인 없이)
+            reviewService.adminDeleteReview(reviewId);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "리뷰가 관리자 권한으로 삭제되었습니다."
+            ));
+            
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                "success", false,
+                "message", "리뷰를 찾을 수 없습니다."
+            ));
+        } catch (Exception e) {
+            log.error("관리자 리뷰 삭제 중 오류 발생: reviewId={}", reviewId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "success", false,
+                "message", "리뷰 삭제 중 오류가 발생했습니다."
+            ));
         }
     }
     
@@ -208,13 +260,17 @@ public class MusicReviewController {
     @PostMapping("/{reviewId}/helpful")
     public ResponseEntity<Void> markAsHelpful(
             @PathVariable Long reviewId,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest servletRequest) {
         
-        log.info("도움이 됨 요청 수신: reviewId={}, user={}", reviewId, oauth2User != null ? oauth2User.getName() : "null");
+        log.info("도움이 됨 요청 수신: reviewId={}, oauth2User={}, session={}", 
+                reviewId, oauth2User != null ? oauth2User.getName() : "null", 
+                servletRequest.getSession(false) != null ? "exists" : "null");
         
         try {
-            Long userId = getUserId(oauth2User);
-            log.info("사용자 ID 추출 성공: userId={}", userId);
+            Long userId = getUserId(oauth2User, servletRequest);
+            log.info("=== 도움이 됨 처리 시작 ===");
+            log.info("OAuth2User: {}, userId: {}, reviewId: {}", oauth2User != null ? "exists" : "null", userId, reviewId);
             
             reviewService.markReviewAsHelpful(reviewId, userId);
             log.info("도움이 됨 처리 성공: reviewId={}, userId={}", reviewId, userId);
@@ -261,10 +317,11 @@ public class MusicReviewController {
     public ResponseEntity<Map<String, Object>> reportReview(
             @PathVariable Long reviewId,
             @RequestBody Map<String, Object> reportRequest,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest servletRequest) {
         
         try {
-            Long userId = getUserId(oauth2User);
+            Long userId = getUserId(oauth2User, servletRequest);
             String reasonStr = (String) reportRequest.get("reason");
             String description = (String) reportRequest.get("description");
             
@@ -300,10 +357,11 @@ public class MusicReviewController {
     @GetMapping("/{reviewId}/report-status")
     public ResponseEntity<Map<String, Object>> getReportStatus(
             @PathVariable Long reviewId,
-            @AuthenticationPrincipal OAuth2User oauth2User) {
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest servletRequest) {
         
         try {
-            Long userId = getUserId(oauth2User);
+            Long userId = getUserId(oauth2User, servletRequest);
             boolean hasReported = reviewService.hasUserReportedReview(reviewId, userId);
             long reportCount = reviewService.getReportCount(reviewId);
             
@@ -320,23 +378,63 @@ public class MusicReviewController {
         }
     }
     
-    private Long getUserId(OAuth2User oauth2User) {
-        if (oauth2User == null) {
-            throw new IllegalArgumentException("인증된 사용자 정보를 찾을 수 없습니다.");
+    @GetMapping("/admin-status")
+    public ResponseEntity<Map<String, Object>> getAdminStatus(
+            @AuthenticationPrincipal OAuth2User oauth2User,
+            HttpServletRequest servletRequest) {
+        
+        try {
+            Long userId = getUserId(oauth2User, servletRequest);
+            boolean isAdmin = userService.isAdmin(userId);
+            
+            return ResponseEntity.ok(Map.of(
+                "isAdmin", isAdmin,
+                "userId", userId
+            ));
+            
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of(
+                "isAdmin", false,
+                "userId", null
+            ));
+        }
+    }
+    
+    private Long getUserId(OAuth2User oauth2User, HttpServletRequest request) {
+        // 1. 먼저 OAuth2 로그인 사용자 확인
+        if (oauth2User != null) {
+            log.info("OAuth2 사용자 처리: {}", oauth2User.getName());
+            Map<String, Object> attrs = oauth2User.getAttributes();
+            String extractedEmail = extractEmailFromOAuth2User(attrs);
+            
+            if (extractedEmail != null && !extractedEmail.isBlank()) {
+                return userService.findUserByEmail(extractedEmail)
+                        .map(User::getId)
+                        .orElseThrow(() -> new IllegalArgumentException("OAuth2 사용자를 찾을 수 없습니다: " + extractedEmail));
+            }
         }
         
-        // OAuth2User의 attributes에서 사용자 정보 추출
-        Map<String, Object> attrs = oauth2User.getAttributes();
-        String extractedEmail = extractEmailFromOAuth2User(attrs);
+        // 2. 로컬 세션 로그인 사용자 확인
+        HttpSession session = request.getSession(false);
+        log.info("세션 정보: session={}, sessionId={}", 
+                 session != null ? "exists" : "null", 
+                 session != null ? session.getId() : "null");
         
-        // DB에서 사용자 조회
-        if (extractedEmail != null && !extractedEmail.isBlank()) {
-            return userService.findUserByEmail(extractedEmail)
-                    .map(User::getId)
-                    .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다: " + extractedEmail));
+        if (session != null) {
+            Long localUserId = (Long) session.getAttribute("userId");
+            String authProvider = (String) session.getAttribute("authProvider");
+            log.info("세션 속성: userId={}, authProvider={}", localUserId, authProvider);
+            
+            if (localUserId != null) {
+                log.info("로컬 세션 사용자 처리: userId={}", localUserId);
+                return localUserId;
+            }
         }
         
-        throw new IllegalArgumentException("사용자 정보를 추출할 수 없습니다.");
+        log.warn("인증된 사용자 정보를 찾을 수 없습니다. OAuth2User: {}, Session: {}", 
+                oauth2User != null ? "exists" : "null",
+                session != null ? "exists" : "null");
+        throw new IllegalArgumentException("인증된 사용자 정보를 찾을 수 없습니다.");
     }
     
     private String extractEmailFromOAuth2User(Map<String, Object> attrs) {

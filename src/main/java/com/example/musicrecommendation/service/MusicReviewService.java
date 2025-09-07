@@ -97,7 +97,7 @@ public class MusicReviewService {
     }
     
     @Transactional
-    @CacheEvict(value = "reviews", allEntries = true)
+    @CacheEvict(value = {"reviews", "user-names", "musicRecommendations"}, allEntries = true)
     public MusicReview updateReview(Long reviewId, Long userId, Integer rating, String reviewText, List<String> tags) {
         
         // 보안 검증
@@ -150,6 +150,16 @@ public class MusicReviewService {
         log.info("리뷰 삭제 완료 - ID: {}, 사용자: {}", reviewId, userId);
     }
     
+    @Transactional
+    @CacheEvict(value = "reviews", allEntries = true)
+    public void adminDeleteReview(Long reviewId) {
+        MusicReview review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new IllegalArgumentException("리뷰를 찾을 수 없습니다."));
+        
+        reviewRepository.delete(review);
+        log.info("관리자 권한으로 리뷰 삭제 완료 - ID: {}, 원 작성자: {}", reviewId, review.getUserId());
+    }
+    
     // @Cacheable(value = "reviews", key = "'item_' + #musicItemId")
     public Page<MusicReview> getReviewsByMusicItem(Long musicItemId, Pageable pageable) {
         MusicItem musicItem = musicItemRepository.findById(musicItemId)
@@ -165,19 +175,7 @@ public class MusicReviewService {
     
     // @Cacheable(value = "reviews", key = "'recent_' + #pageable.pageNumber + '_' + #pageable.pageSize")
     public Page<MusicReview> getRecentReviews(Pageable pageable) {
-        Page<MusicReview> reviews = reviewRepository.findByIsPublicTrueOrderByCreatedAtDesc(pageable);
-        
-        // 각 리뷰의 MusicItem을 강제로 다시 로딩 (디버깅용)
-        reviews.getContent().forEach(review -> {
-            MusicItem musicItem = musicItemRepository.findById(review.getMusicItem().getId()).orElse(null);
-            if (musicItem != null) {
-                review.setMusicItem(musicItem);
-                log.info("🔍 리뷰 ID: {}, MusicItem 재로딩: ID={}, 곡명='{}'", 
-                        review.getId(), musicItem.getId(), musicItem.getName());
-            }
-        });
-        
-        return reviews;
+        return reviewRepository.findByIsPublicTrueOrderByCreatedAtDesc(pageable);
     }
     
     // @Cacheable(value = "reviews", key = "'helpful_' + #pageable.pageNumber + '_' + #pageable.pageSize")
@@ -320,7 +318,7 @@ public class MusicReviewService {
     /**
      * MusicReview를 사용자 닉네임이 포함된 ReviewDto.Response로 변환
      */
-    // @Cacheable(value = "user-names", key = "#review.userId")
+    @Cacheable(value = "user-names", key = "#review.id + '_' + #review.userId")
     public ReviewDto.Response convertToResponseWithUserNickname(MusicReview review) {
         String userNickname = userService.findUserById(review.getUserId())
                 .map(User::getName)

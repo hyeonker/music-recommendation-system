@@ -1,6 +1,7 @@
 package com.example.musicrecommendation.config;
 
 import com.example.musicrecommendation.security.CustomOAuth2UserService;
+import com.example.musicrecommendation.security.LocalSessionAuthenticationFilter;
 import com.example.musicrecommendation.security.OAuth2LoginSuccessHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -8,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -24,16 +26,22 @@ public class SecurityConfig {
 
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2LoginSuccessHandler successHandler;
+    private final LocalSessionAuthenticationFilter localSessionAuthenticationFilter;
 
     public SecurityConfig(CustomOAuth2UserService customOAuth2UserService,
-                          OAuth2LoginSuccessHandler successHandler) {
+                          OAuth2LoginSuccessHandler successHandler,
+                          LocalSessionAuthenticationFilter localSessionAuthenticationFilter) {
         this.customOAuth2UserService = customOAuth2UserService;
         this.successHandler = successHandler;
+        this.localSessionAuthenticationFilter = localSessionAuthenticationFilter;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                // ⚡ LOCAL 세션 인증 필터 추가 - OAuth2 필터 전에 실행
+                .addFilterBefore(localSessionAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                
                 // 🔐 엔드포인트 접근 제어
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
