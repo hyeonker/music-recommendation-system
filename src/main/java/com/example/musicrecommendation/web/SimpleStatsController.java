@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
  * 간단한 통계 컨트롤러 (에러 없는 버전)
  */
 @RestController
-@RequestMapping("/api/simple-stats")
+@RequestMapping("/api/stats")
 @Tag(name = "📊 Simple Statistics", description = "간단한 통계 시스템")
 public class SimpleStatsController {
 
@@ -64,5 +64,23 @@ public class SimpleStatsController {
             public final double uptime = 99.8;
             public final String version = "1.0.0";
         });
+    }
+
+    @GetMapping("/genres")
+    @Operation(summary = "🎵 장르별 통계", description = "장르별 음악 분포 통계")
+    public ResponseEntity<?> getGenreStats() {
+        return ResponseEntity.ok(simpleStatsService.getGenreStats());
+    }
+
+    @GetMapping("/user-activity")
+    @Operation(summary = "👥 사용자 활동", description = "주간 사용자 활동 통계")
+    public ResponseEntity<?> getUserActivity() {
+        return ResponseEntity.ok(simpleStatsService.getUserActivityStats());
+    }
+
+    @GetMapping("/matching-trends")
+    @Operation(summary = "💕 매칭 추이", description = "월별 매칭 성공률 추이")
+    public ResponseEntity<?> getMatchingTrends() {
+        return ResponseEntity.ok(simpleStatsService.getMatchingTrends());
     }
 }

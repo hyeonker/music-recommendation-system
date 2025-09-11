@@ -198,14 +198,9 @@ const Stats: React.FC = () => {
                     }));
                     setMatchingData(list.length ? list : []);
                 } catch (error) {
-                    setMatchingData([
-                        { month: '1월', successRate: 68, totalMatches: 45 },
-                        { month: '2월', successRate: 72, totalMatches: 52 },
-                        { month: '3월', successRate: 75, totalMatches: 63 },
-                        { month: '4월', successRate: 78, totalMatches: 71 },
-                        { month: '5월', successRate: 82, totalMatches: 84 },
-                        { month: '6월', successRate: 85, totalMatches: 92 },
-                    ]);
+                    console.log('매칭 추이 API 요청 실패:', error);
+                    // 실제 데이터가 없으면 빈 배열로 설정 (더미 데이터 제거)
+                    setMatchingData([]);
                 }
             } catch (error) {
                 // 페이지 전체가 꺾이지 않도록 기본값 채움
@@ -229,11 +224,8 @@ const Stats: React.FC = () => {
                     { day: '화', users: 135, recommendations: 380 },
                     { day: '수', users: 148, recommendations: 420 },
                 ]);
-                setMatchingData([
-                    { month: '1월', successRate: 68, totalMatches: 45 },
-                    { month: '2월', successRate: 72, totalMatches: 52 },
-                    { month: '3월', successRate: 75, totalMatches: 63 },
-                ]);
+                // 실제 데이터가 없으면 빈 배열로 설정 (더미 데이터 제거)
+                setMatchingData([]);
             } finally {
                 setLoading(false);
             }
